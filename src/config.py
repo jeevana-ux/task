@@ -37,24 +37,7 @@ class Config:
     ENABLE_CONSOLE_LOGGING = os.getenv("ENABLE_CONSOLE_LOGGING", "true").lower() == "true"
     
     # Text Cleaning Patterns
-    # Text Cleaning Patterns
-    # Note: Regexes are designed to be non-greedy to verify they don't eat email body
-    DISCLAIMER_PATTERNS = [
-        r"CAUTION:.*?(?:\n\n|$)",
-        r"(?:Disclaimer|CONFIDENTIALITY NOTICE|IMPORTANT):.*?(?:\n\n|$)",
-        r"This (?:email|message) is intended only for.*?(?:\n\n|$)",
-    ]
-    
-    FORWARDED_PATTERNS = [
-        # Match standard forwarded header block (up to 10 lines of metadata)
-        r"-{5,}\s*Forwarded [Mm]essage\s*-{5,}\n(?:.*?\n){0,10}?(?=\n)",
-        r"Begin forwarded message:\n(?:.*?\n){0,10}?(?=\n)",
-        r"From:.*?\nSent:.*?\nTo:.*?\nSubject:.*?\n",
-    ]
-    
-    LINK_PATTERN = r"https?://[^\s]+"
-    
-    EMAIL_FOOTER_PATTERN = r"(?:Best [Rr]egards|Thanks|Sincerely|Regards),?\s*\n.*?(?:\n.*?){0,5}$"
+    # Note: Regexes are managed internally by src.cleaners.text_cleaners.ContentCleaner
     
     # Field Defaults
     DEFAULT_SCHEME_PERIOD = "Duration"
@@ -63,54 +46,10 @@ class Config:
     DEFAULT_REMOVE_GST = "Not Specified"
     DEFAULT_OVER_ABOVE = "FALSE"
     DEFAULT_SCHEME_TYPE = "SELL_SIDE"
-    DEFAULT_SCHEME_SUBTYPE = "PUC/FDC"
+    DEFAULT_SCHEME_SUBTYPE = "PUC"
     
-    # Scheme Classification Keywords
-    SCHEME_KEYWORDS = {
-        "BUY_SIDE": {
-            "PERIODIC_CLAIM": [
-                "jbp", "joint business plan", "tot", "terms of trade",
-                "sell in", "sell-in", "sellin", "buy side", "buyside",
-                "periodic", "quarter", "q1", "q2", "q3", "q4",
-                "annual", "fy", "yearly support", "marketing support",
-                "gmv support", "nrv", "nrv-linked", "inwards",
-                "net inwards", "inventory support", "business plan",
-                "commercial alignment", "funding for fy"
-            ],
-            "PDC": [
-                "price drop", "price protection", "pp", "pdc",
-                "cost reduction", "nlc change", "cost change",
-                "sellin price drop", "invoice cost correction",
-                "backward margin", "revision in buy price"
-            ]
-        },
-        "ONE_OFF": [
-            "one off", "one-off", "one off buyside",
-            "one off sell side", "ad-hoc approval", "special approval"
-        ],
-        "SELL_SIDE": {
-            "PUC/FDC": [
-                "sellout", "sell out", "sell-side", "puc", "cp", "fdc",
-                "pricing support", "channel support", "market support",
-                "discount on selling price", "rest all support"
-            ],
-            "COUPON": [
-                "coupon", "vpc", "promo code", "offer code",
-                "discount coupon", "voucher"
-            ],
-            "SUPER COIN": [
-                "super coin", "sc funding", "loyalty coins"
-            ],
-            "PREXO": [
-                "exchange", "prexo", "upgrade", "bump up", "bup",
-                "exchange offer"
-            ],
-            "BANK OFFER": [
-                "bank offer", "card offer", "hdfc offer", "axis offer",
-                "icici offer", "cashback", "emi offer"
-            ]
-        }
-    }
+    # Note: Scheme classification (scheme_type, scheme_subtype) is now done by the LLM
+    # with Chain-of-Thought reasoning in the DSPy signatures, not keyword matching.
     
     @classmethod
     def validate(cls):

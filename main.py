@@ -44,8 +44,7 @@ def main(input_path, output_dir, model, temperature, max_tokens):
     if max_tokens:
         Config.MAX_TOKENS = max_tokens
     
-    if max_tokens:
-        Config.MAX_TOKENS = max_tokens
+
     
     # Get input files early to determine naming strategy
     try:
@@ -71,8 +70,6 @@ def main(input_path, output_dir, model, temperature, max_tokens):
     
     # Configure DSPy (initial check)
     # configure_dspy(logger) # Defer to loop
-    
-    # Initialize metrics aggregation
     
     # Initialize metrics aggregation
     all_results = []
@@ -137,7 +134,6 @@ def main(input_path, output_dir, model, temperature, max_tokens):
     save_consolidated_output(Path(output_dir), all_results, metrics)
     
     print_summary(metrics)
-    print_summary(metrics)
     click.echo(f"\n✅ Batch Processing Complete! Output Root: {output_dir}")
 
 
@@ -162,6 +158,9 @@ def configure_dspy(logger):
         
         dspy.configure(lm=lm)
         logger.success(f"DSPy configured with model: {Config.DEFAULT_MODEL}")
+        
+        # Log model parameters
+        logger.log_model_params(Config.get_model_params())
     
     except Exception as e:
         logger.error(f"DSPy configuration failed: {str(e)}")
@@ -236,7 +235,6 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
     
     # LLM extraction
     stage_start = time.time()
-    logger.section("LLM Field Extraction with DSPy Chain-of-Thought")
     field_extractor = RetailerHubFieldExtractor(logger)
     tracker = TokenTracker(model=Config.DEFAULT_MODEL)
     

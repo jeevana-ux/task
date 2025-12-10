@@ -2,3 +2,4 @@ input/
 outputs/
 logs/
 .env
+previous_runs/
