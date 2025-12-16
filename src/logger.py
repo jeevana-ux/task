@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
+import textwrap
 from colorama import init, Fore, Style
 
 init(autoreset=True)
@@ -204,13 +205,21 @@ class FieldLevelLogger:
         confidence: str = "Medium"
     ):
         """Log detailed field extraction with full reasoning."""
-        # Detailed file logging
+        # Fix: Use textwrap to support unlimited reasoning length in file logs
+        reasoning_lines = textwrap.wrap(str(reasoning), width=76)
+        if not reasoning_lines:
+            reasoning_lines = ["No reasoning provided."]
+            
+        # Create multiline reasoning block for the box
+        reasoning_block = "\n".join([f"│ {line:<76}│" for line in reasoning_lines])
+        
+        # Detailed file logging (FULL REASONING)
         log_entry = f"""
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ FIELD: {field_name:<69}│
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ REASONING:                                                                   │
-│ {self._wrap_text(str(reasoning), 76):<76}│
+{reasoning_block}
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ OUTPUT VALUE: {str(output_value)[:62]:<62}│
 │ CONFIDENCE:   {confidence:<62}│
@@ -222,6 +231,10 @@ class FieldLevelLogger:
         conf_color = {"High": Fore.GREEN, "Medium": Fore.YELLOW, "Low": Fore.RED}.get(confidence, Fore.WHITE)
         display_value = str(output_value)[:50] + "..." if len(str(output_value)) > 50 else str(output_value)
         self._console(f"  {field_name:<35} → {display_value}", conf_color)
+        
+        # Show reasoning snippet in console
+        reasoning_short = reasoning_lines[0][:90] + "..." if len(reasoning) > 90 else reasoning_lines[0]
+        self._console(f"  {Style.DIM}↳ {reasoning_short}{Style.RESET_ALL}")
     
     def log_all_field_extractions(self, extractions: List[Dict[str, Any]]):
         """Log all field extractions in a structured format."""
@@ -317,17 +330,57 @@ class FieldLevelLogger:
     # UTILITY METHODS
     # =========================================================================
     
-    def _wrap_text(self, text: str, width: int) -> str:
-        """Wrap text to fit within specified width."""
-        if not text:
-            return ""
-        # Take first line only for box format
-        first_line = text.replace('\n', ' ')[:width-4]
-        return first_line
+
     
     def log_llm_context(self, context: str):
         """Log full LLM context (file only, truncated)."""
         self._log_file(f"LLM CONTEXT (first 3000 chars):\n{context[:3000]}...", "DEBUG")
+        
+    def log_few_shot_context(self, demos: List[Any]):
+        """Log the few-shot examples (demos) being used in the prompt."""
+        if not demos:
+            return
+            
+        header = f"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    ACTIVE FEW-SHOT EXAMPLES (PROMPT)                          ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║ The following {len(demos)} examples are being injected into the prompt.            ║
+║ The LLM will use these patterns to reason about the new input.               ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+"""
+        self._log_file(header)
+        
+        for idx, demo in enumerate(demos, 1):
+            # Safe extraction logic for DSPy Example objects
+            # They behave like dicts but sometimes need explicit casting
+            try:
+                # Try dict access if possible, or fallback to object attributes
+                if hasattr(demo, 'toDict'):
+                    data = demo.toDict()
+                elif isinstance(demo, dict):
+                    data = demo
+                else:
+                    data = getattr(demo, '_store', vars(demo))
+            except:
+                data = {}
+
+            # Extract fields with safe fallbacks
+            email_text = data.get('email_text', getattr(demo, 'email_text', 'N/A'))
+            reasoning = data.get('reasoning', getattr(demo, 'reasoning', 'N/A'))
+            scheme_type = data.get('scheme_type', getattr(demo, 'scheme_type', 'N/A'))
+            
+            # Format truncated demo
+            demo_entry = f"""
+┌─ EXAMPLE #{idx} ──────────────────────────────────────────────────────────────────
+│ INPUT (Email): {str(email_text)[:100]}...
+│
+│ REASONING: {str(reasoning)[:200]}...
+│
+│ OUTPUT (Scheme Type): {scheme_type}
+└──────────────────────────────────────────────────────────────────────────────
+"""
+            self._log_file(demo_entry)
 
 
 def create_logger(output_dir: Path, console_enabled: bool = True) -> FieldLevelLogger:

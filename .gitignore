@@ -3,3 +3,5 @@ outputs/
 logs/
 .env
 previous_runs/
+llmContext_data/
+train/

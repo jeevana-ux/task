@@ -26,7 +26,21 @@ class Config:
     PRESENCE_PENALTY = float(os.getenv("PRESENCE_PENALTY", "0.0"))
     
     # Tesseract OCR
-    TESSERACT_CMD = os.getenv("TESSERACT_CMD", "tesseract")
+    # Tesseract OCR
+    TESSERACT_CMD = os.getenv("TESSERACT_CMD")
+    if not TESSERACT_CMD:
+        # Try common Windows paths
+        possible_paths = [
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Tesseract-OCR\tesseract.exe")
+        ]
+        for p in possible_paths:
+            if os.path.exists(p):
+                TESSERACT_CMD = p
+                break
+        else:
+            TESSERACT_CMD = "tesseract" # Default to system PATH
     
     # Directory Paths
     PROJECT_ROOT = Path(__file__).parent.parent

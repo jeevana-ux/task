@@ -12,15 +12,32 @@ class TokenTracker:
     # Pricing per 1M tokens (as of Dec 2024)
     # Format: {model_name: (input_price_per_1M, output_price_per_1M)}
     PRICING = {
+        # OpenAI
         "openai/gpt-4o": (2.50, 10.00),
         "openai/gpt-4o-mini": (0.15, 0.60),
         "openai/gpt-4-turbo": (10.00, 30.00),
+        
+        # Anthropic
         "anthropic/claude-3.5-sonnet": (3.00, 15.00),
         "anthropic/claude-3-opus": (15.00, 75.00),
         "anthropic/claude-3-haiku": (0.25, 1.25),
+        
+        # Google
         "google/gemini-pro-1.5": (1.25, 5.00),
+        "google/gemini-flash-1.5": (0.075, 0.30),
+        
+        # Mistral
         "mistralai/mistral-large": (2.00, 6.00),
-        "qwen/qwen-2.5-72b-instruct": (0.35, 0.70),
+        
+        # Qwen (OpenRouter pricing ~Dec 2024)
+        "qwen/qwen-2.5-72b-instruct": (0.35, 0.40),
+        "qwen/qwen-2.5-32b-instruct": (0.07, 0.13),
+        "qwen/qwen-2.5-14b-instruct": (0.04, 0.08),
+        "qwen/qwen-2.5-7b-instruct": (0.01, 0.01),
+        
+        # Alias for user's specific string "qwen/qwen3-32b" (mapped to Qwen 2.5 32B pricing approx)
+        "openrouter/qwen/qwen3-32b": (0.07, 0.13), 
+        "qwen/qwen3-32b": (0.07, 0.13),
     }
     
     def __init__(self, model: str = "openai/gpt-4o"):

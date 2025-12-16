@@ -59,18 +59,7 @@ EXAMPLE: 'Brand offers 5% sellout support on select SKUs for Q1 visibility campa
         desc="REASONING: What is the core offer? How did you distill the business intent?"
     )
     
-    # ============================================================================
-    # Field 3: Additional Conditions
-    # ============================================================================
-    additional_conditions = dspy.OutputField(
-        desc="""Extract special conditions, restrictions, or requirements.
-LOOK FOR: Caps/limits, exclusions, proof requirements, payment terms, eligibility rules.
-EXAMPLES: 'Max 2 units per order', 'Proof of display required', 'Applicable on listed FSNs only'.
-OUTPUT: Comma-separated list OR 'None specified' if none found."""
-    )
-    additional_conditions_reasoning = dspy.OutputField(
-        desc="REASONING: What special terms or restrictions did you identify?"
-    )
+
     
     # ============================================================================
     # Field 4: Scheme Period Type
@@ -150,7 +139,7 @@ ANALYZE: Who is PROVIDING the support? That's the vendor."""
         desc="""Extract price drop effective date (PDC schemes only).
 APPLICABLE: Only if scheme involves price reduction/protection.
 LOOK FOR: 'price drop effective', 'cost change w.e.f', 'NLC revision from'.
-FORMAT: 'DD/MM/YYYY' or 'N/A' if not PDC scheme."""
+STRICT FORMAT: 'DD/MM/YYYY' (e.g. 25/05/2024) or 'N/A'."""
     )
     price_drop_date_reasoning = dspy.OutputField(
         desc="REASONING: Is this a PDC scheme? What price drop date was mentioned?"
@@ -160,7 +149,7 @@ FORMAT: 'DD/MM/YYYY' or 'N/A' if not PDC scheme."""
     # Field 10 & 11: Start & End Dates
     # ============================================================================
     start_date = dspy.OutputField(
-        desc="""Extract scheme START date. Format: 'DD/MM/YYYY' or 'Not Specified'.
+        desc="""Extract scheme START date. STRICT FORMAT: 'DD/MM/YYYY' (e.g. 01/01/2024) or 'Not Specified'.
 PRIORITY: Scheme start > Invoice start > Email date."""
     )
     start_date_reasoning = dspy.OutputField(
@@ -168,7 +157,7 @@ PRIORITY: Scheme start > Invoice start > Email date."""
     )
     
     end_date = dspy.OutputField(
-        desc="""Extract scheme END date. Format: 'DD/MM/YYYY' or 'Not Specified'.
+        desc="""Extract scheme END date. STRICT FORMAT: 'DD/MM/YYYY' (e.g. 31/12/2024) or 'Not Specified'.
 LOOK FOR: 'valid until', 'ending', 'expires on', 'through'."""
     )
     end_date_reasoning = dspy.OutputField(
@@ -313,7 +302,7 @@ DO NOT just match keywords. ANALYZE THE BUSINESS CONTEXT:
   - Super Coin rewards (customer incentive)
   - Pricing/CP support on selling price
 
-**ONE_OFF** (Claim ID prefix: OFC-OFC)
+**OFC** (One-Off Claim)
 → WHAT IT MEANS: One-time, ad-hoc support not tied to regular schemes.
 → BUSINESS CONTEXT: Special approval for specific situation, not part of JBP/regular plan.
 → INDICATORS:
@@ -321,8 +310,20 @@ DO NOT just match keywords. ANALYZE THE BUSINESS CONTEXT:
   - Ad-hoc approval, special sanction
   - Specific amount approved for exception
 
-OUTPUT: Exactly 'BUY_SIDE', 'SELL_SIDE', or 'ONE_OFF'.
-THINK: Is this about helping purchase (BUY) or helping sell (SELL) or a special exception (ONE_OFF)?"""
+OUTPUT: Exactly 'BUY_SIDE', 'SELL_SIDE', or 'OFC'.
+THINK: Is this about helping purchase (BUY) or helping sell (SELL) or a special exception (OFC)?"""
+    )
+    
+    scheme_type_reasoning = dspy.OutputField(
+        desc="""EXPLAIN YOUR SCHEME TYPE DECISION.
+        
+Structure:
+1. **Business Direction**: Is support for Flipkart's BUYING or SELLING activity?
+2. **Key Evidence**: What specific phrases/keywords led to this classification?
+3. **Why not others?**: Why did you rule out the other types?
+
+Example: "This is SELL_SIDE because it mentions 'sellout support' and 'customer discounts', indicating support for selling to customers, not purchasing from the brand."
+"""
     )
     
     scheme_subtype = dspy.OutputField(
@@ -357,20 +358,24 @@ THINK: Is this about helping purchase (BUY) or helping sell (SELL) or a special 
 6. **'LS'** (Lifestyle): Lifestyle category specific.
    → KEYWORDS: Lifestyle, Fashion.
 
-**IF ONE_OFF:**
-- 'N/A'
+**IF OFC (One-Off):**
+- 'OFC'
 
-OUTPUT: The code ONLY (e.g., 'CP', 'PUC', 'PRX')."""
+OUTPUT: The code ONLY (e.g., 'CP', 'PUC', 'PRX', 'OFC')."""
     )
     
-    scheme_classification_reasoning = dspy.OutputField(
-        desc="""PROVIDE DETAILED REASONING for your classification.
-        
-1. **Analyze Scheme Type**: Why is it BUY_SIDE or SELL_SIDE?
-2. **Analyze Mechanism (CRITICAL)**:
-   - Does it mention "Coupons" or "VPC"? -> Must be 'CP'.
-   - Does it mention "Exchange" or "BUP"? -> Must be 'PRX'.
-   - Does it mention "Bank" or "Card"? -> Must be 'BOC'.
-   - Is it just "Price Support" or "FDC"? -> Must be 'PUC'.
-3. **Final Decision**: State the code based on the mechanism."""
+    scheme_subtype_reasoning = dspy.OutputField(
+        desc="""EXPLAIN YOUR SUBTYPE DECISION (based on the scheme_type you chose).
+
+Structure:
+1. **Mechanism Analysis**: What is the specific support mechanism?
+   - For SELL_SIDE: Is it Coupon? Exchange? Bank? Generic pricing?
+   - For BUY_SIDE: Is it periodic or price protection?
+2. **Key Evidence**: What specific words/phrases indicate this mechanism?
+3. **Why this code?**: Why this subtype and not others in the same category?
+
+Example for SELL_SIDE: "Subtype is 'CP' because the email explicitly mentions 'VPC codes' and 'customer coupons', indicating a coupon-based mechanism rather than generic pricing support (PUC) or exchange offers (PRX)."
+
+Example for BUY_SIDE: "Subtype is 'PDC' because it mentions 'price drop effective from' and 'cost reduction support', indicating price protection rather than periodic quarterly support."
+"""
     )

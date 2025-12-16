@@ -6,9 +6,9 @@ import sys
 import os
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 import click
-import dspy
 
 from src.config import Config
 from src.logger import create_logger
@@ -17,7 +17,6 @@ from src.utils.token_tracker import TokenTracker
 from src.extractors.pdf_extractor import PDFExtractor
 from src.extractors.table_extractor import TableExtractor
 from src.cleaners.text_cleaners import ContentCleaner as TextCleaner
-from src.dspy_modules.field_extractor import RetailerHubFieldExtractor
 
 
 @click.command()
@@ -26,7 +25,9 @@ from src.dspy_modules.field_extractor import RetailerHubFieldExtractor
 @click.option('--model', default=None, help=f'OpenRouter model name (default: {Config.DEFAULT_MODEL})')
 @click.option('--temperature', default=None, type=float, help=f'LLM temperature 0.0-1.0 (default: {Config.TEMPERATURE})')
 @click.option('--max-tokens', default=None, type=int, help=f'Max output tokens (default: {Config.MAX_TOKENS})')
-def main(input_path, output_dir, model, temperature, max_tokens):
+@click.option('--extract-only', is_flag=True, help='Stop after extraction, skipping context generation and LLM')
+@click.option('--context-only', is_flag=True, help='Generate full LLM context file but skip LLM call')
+def main(input_path, output_dir, model, temperature, max_tokens, extract_only, context_only):
     """PDF Extraction & Retailer Hub Field Mapping System - Batch Processing"""
     start_time = time.time()
     
@@ -86,15 +87,30 @@ def main(input_path, output_dir, model, temperature, max_tokens):
         sys.exit(1)
     
     metrics["total_pdfs"] = len(pdf_files)
-        
+    
     # Create per-file output for each PDF
+    input_path_obj = Path(input_path).resolve()
+    run_timestamp = datetime.now().strftime("%H%M%S")  # Timestamp for this run
+    
     for idx, pdf_file in enumerate(pdf_files, 1):
-        # Determine timestamp and folder name
-        timestamp = time.strftime("%d%m%Y%H%M")
-        folder_name = f"{pdf_file.stem}_{timestamp}"
-        file_output_path = Path(output_dir) / folder_name
+        # Determine Output Folder Name based on Input Structure
+        # Case 1: Flat structure (PDF is directly in input_path) -> Output Name: {filename}_{timestamp}_folder
+        # Case 2: Nested structure (PDF is in a subfolder) -> Output Name: {subfolder_name}_{timestamp}
+        
+        if pdf_file.parent.resolve() == input_path_obj:
+             # Case 1: Flat input
+             output_folder_name = f"{pdf_file.stem}_{run_timestamp}"
+        else:
+             # Case 2: Nested input (Group Folder)
+             output_folder_name = f"{pdf_file.parent.name}_{run_timestamp}"
+        
+        # Output base: ./outputs/{OutputFolderName}/
+        file_output_path = Path(output_dir) / output_folder_name
         file_output_path.mkdir(parents=True, exist_ok=True)
         
+        # 2. Filter XLSX files: Only use those in the SAME directory as the PDF
+        local_xlsx_files = [x for x in xlsx_files if x.parent == pdf_file.parent]
+
         # Initialize logger for this file
         logger = create_logger(file_output_path, console_enabled=True)
         
@@ -106,11 +122,23 @@ def main(input_path, output_dir, model, temperature, max_tokens):
         logger.log_processing_start(pdf_file)
         
         try:
-            # Configure DSPy for this run (logger might change)
-            configure_dspy(logger)
-            logger.log_model_params(Config.get_model_params())
 
-            result, file_metrics = process_pdf(pdf_file, file_output_path, xlsx_files, logger, idx)
+            # Determine if we should stop early
+            should_stop_early = extract_only or context_only
+            
+            # Configure DSPy for this run (logger might change), ONLY if running full pipeline
+            if not should_stop_early:
+                configure_dspy(logger)
+                logger.log_model_params(Config.get_model_params())
+
+            result, file_metrics = process_pdf(pdf_file, file_output_path, local_xlsx_files, logger, idx, should_stop_early)
+            
+            if should_stop_early:
+                logger.success(f"✓ Context generation completed for {pdf_file.name} (Skipped LLM)")
+                logger.info(f"✅ Output saved to: {file_output_path}")
+                metrics["successful"] += 1
+                continue
+
             all_results.append(result)
             metrics["per_file_metrics"].append(file_metrics)
             metrics["successful"] += 1
@@ -139,6 +167,7 @@ def main(input_path, output_dir, model, temperature, max_tokens):
 
 def configure_dspy(logger):
     """Configure DSPy with OpenRouter LLM."""
+    import dspy # Lazy import to avoid loading issues if not used
     try:
         # Set environment variables for OpenRouter/LiteLLM
         os.environ["OPENROUTER_API_KEY"] = Config.OPENROUTER_API_KEY
@@ -183,18 +212,19 @@ def configure_dspy(logger):
         raise e
 
 
-def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, file_idx: int):
+def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, file_idx: int, stop_early: bool = False):
     """Process single PDF and return results + metrics."""
     file_start = time.time()
     
-    # Define subdirectories per file
-    file_extracted_dir = output_root / "extracted_output"
-    file_cleaned_dir = output_root / "cleaned_data"
+    # Define subdirectories
+    file_extracted_dir = output_root / "extracted_text"
+    file_cleaned_dir = output_root / "llm_context"
     final_root = output_root / "final_output"
     
     file_extracted_dir.mkdir(parents=True, exist_ok=True)
     file_cleaned_dir.mkdir(parents=True, exist_ok=True)
-    final_root.mkdir(parents=True, exist_ok=True)
+    if not stop_early:
+        final_root.mkdir(parents=True, exist_ok=True)
     
     # Extract text
     stage_start = time.time()
@@ -235,7 +265,7 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
     
     # LLM extraction
     stage_start = time.time()
-    field_extractor = RetailerHubFieldExtractor(logger)
+
     tracker = TokenTracker(model=Config.DEFAULT_MODEL)
     
     # Prepare full context for LLM
@@ -247,23 +277,55 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
     # Log full context to debug log
     logger.log_llm_context(full_context)
     
-    output_json = field_extractor.extract_fields(cleaned_text, table_text, xlsx_text)
+    # Check if we should stop here (Context Only / Extract Only)
+    if stop_early:
+        return {}, {
+            "tokens": 0, "cost": 0.0, "time": time.time() - file_start,
+            "status": "context_generated", "pdf_file": pdf_file.name,
+            "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+            "processing_time_seconds": time.time() - file_start
+        }
+
+
+
+    # LLM extraction
+    # Lazy import to avoid crash if dspy is broken and we only wanted context
+    from src.dspy_modules.field_extractor import RetailerHubFieldExtractor
+    
+    stage_start = time.time()
+    field_extractor = RetailerHubFieldExtractor(logger)
+    output_json, reasoning_json, actual_token_stats = field_extractor.extract_fields(cleaned_text, table_text, xlsx_text)
     logger.log_performance("LLM Field Extraction", time.time() - stage_start)
     
-    # Save final JSON output
+    # Save final JSON output (Clean Values)
     logger.info("Step 5/5: Saving output JSON...", console_only=True)
     final_json_path = final_root / f"{pdf_file.stem}_output.json"
     FileHandler.save_json(json.dumps(output_json, indent=2, ensure_ascii=False), final_json_path)
     
-    # Calculate metrics
-    usage_stats = tracker.track_usage(full_context, json.dumps(output_json))
-    logger.log_token_usage(usage_stats["input_tokens"], usage_stats["output_tokens"], 
-                          usage_stats["total_tokens"], usage_stats["model"], usage_stats["cost"])
+    # Save Reasoning JSON (Values + reasoning + confidence)
+    reasoning_json_path = final_root / f"{pdf_file.stem}_reasoning.json"
+    FileHandler.save_json(json.dumps(reasoning_json, indent=2, ensure_ascii=False), reasoning_json_path)
+    
+    # Use actual token stats from DSPy if available, otherwise fall back to estimate
+    if actual_token_stats.get("input_tokens", 0) > 0:
+        input_tokens = actual_token_stats["input_tokens"]
+        output_tokens = actual_token_stats["output_tokens"]
+        total_tokens = input_tokens + output_tokens
+        cost = tracker.calculate_cost(input_tokens, output_tokens)
+    else:
+        # Fallback to estimate
+        usage_stats = tracker.track_usage(full_context, json.dumps(output_json))
+        input_tokens = usage_stats["input_tokens"]
+        output_tokens = usage_stats["output_tokens"]
+        total_tokens = usage_stats["total_tokens"]
+        cost = usage_stats["cost"]
+    
+    logger.log_token_usage(input_tokens, output_tokens, total_tokens, tracker.model, cost)
     
     file_metrics = {
         "file": pdf_file.name, "status": "success", "pages": num_pages, "tables_extracted": num_tables,
-        "input_tokens": usage_stats["input_tokens"], "output_tokens": usage_stats["output_tokens"],
-        "total_tokens": usage_stats["total_tokens"], "cost": usage_stats["cost"],
+        "input_tokens": input_tokens, "output_tokens": output_tokens,
+        "total_tokens": total_tokens, "cost": cost,
         "processing_time_seconds": round(time.time() - file_start, 2),
         "output_directory": str(file_extracted_dir.parent.name)  # Relative to output root
     }

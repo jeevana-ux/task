@@ -73,7 +73,7 @@ tesseract --version
 # Set path in .env if not in system PATH
 # TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
 ```
-
+5. python main.py --input ./input/ --context-only
 ## Usage
 
 ### Basic Usage
