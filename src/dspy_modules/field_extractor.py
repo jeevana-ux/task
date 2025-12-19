@@ -26,44 +26,41 @@ class RetailerHubFieldExtractor:
         # Try to load optimized program
         optimized_path = Config.PROJECT_ROOT / "src" / "dspy_modules" / "optimized_extractor.json"
         
+        # Initialize the ChainOfThought module
+        self.cot_extractor = dspy.ChainOfThought(SchemeExtractionSignature)
+        
         if optimized_path.exists():
             self.logger.info("Loading optimized DSPy module (Few-Shot)...")
             
-            # Load saved demos from JSON
-            import json
-            with open(optimized_path, 'r', encoding='utf-8') as f:
-                saved_state = json.load(f)
-            
-            demos_raw = saved_state.get('predict', {}).get('demos', [])
-            
-            if demos_raw:
-                # Convert raw dicts to dspy.Example objects
+            try:
+                # Standard DSPy pattern: Load saved state directly
+                self.cot_extractor.load(str(optimized_path))
+                
+                # Extract demos for logging purposes
                 demos = []
-                for d in demos_raw:
-                    # Create Example with all fields from the saved demo
-                    ex = dspy.Example(**d).with_inputs("email_text", "table_data", "xlsx_data")
-                    demos.append(ex)
+                if hasattr(self.cot_extractor, 'demos') and self.cot_extractor.demos:
+                    demos = self.cot_extractor.demos
+                elif hasattr(self.cot_extractor, 'predict') and hasattr(self.cot_extractor.predict, 'demos'):
+                    demos = self.cot_extractor.predict.demos or []
                 
                 self.demos_loaded = demos
                 
-                # Use LabeledFewShot to compile the module with these demos
-                from dspy.teleprompt import LabeledFewShot
-                
-                student = dspy.ChainOfThought(SchemeExtractionSignature)
-                optimizer = LabeledFewShot(k=len(demos))  # Use all loaded demos
-                self.cot_extractor = optimizer.compile(student, trainset=demos)
-                
-                total_chars = sum(len(str(d.email_text)) for d in demos)
-                self.logger.info(f"Compiled with {len(demos)} few-shot examples (total input chars: {total_chars})")
-            else:
-                self.logger.warning("Optimized file found but no demos present - using Zero-Shot")
+                if demos:
+                    total_chars = sum(len(str(getattr(d, 'email_text', ''))) for d in demos)
+                    self.logger.info(f"Loaded {len(demos)} few-shot examples (total input chars: {total_chars})")
+                else:
+                    self.logger.warning("Optimized file loaded but no demos found - using Zero-Shot")
+                    
+            except Exception as e:
+                self.logger.warning(f"Failed to load optimized module: {e}")
+                self.logger.info("Falling back to Zero-Shot mode...")
                 self.cot_extractor = dspy.ChainOfThought(SchemeExtractionSignature)
         else:
             self.logger.info("Using default DSPy module (Zero-Shot)...")
-            self.cot_extractor = dspy.ChainOfThought(SchemeExtractionSignature)
     
     # Valid field mapping for reasoning extraction
     FIELD_REASONING_MAP = {
+        
         "scheme_type": "scheme_type_reasoning",
         "scheme_subtype": "scheme_subtype_reasoning",
         "scheme_name": "scheme_name_reasoning",

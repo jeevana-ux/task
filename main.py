@@ -45,8 +45,6 @@ def main(input_path, output_dir, model, temperature, max_tokens, extract_only, c
     if max_tokens:
         Config.MAX_TOKENS = max_tokens
     
-
-    
     # Get input files early to determine naming strategy
     try:
         pdf_files, xlsx_files = FileHandler.get_input_files(input_path)
