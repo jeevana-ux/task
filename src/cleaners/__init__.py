@@ -1,4 +1,4 @@
 """Text content cleaning module."""
-from .text_cleaners import ContentCleaner
+from .deterministic_cleaner import DeterministicContentCleaner
 
-__all__ = ["ContentCleaner"]
+__all__ = ["DeterministicContentCleaner"]

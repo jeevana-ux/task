@@ -281,6 +281,25 @@ OUTPUT: Percentage (e.g., '18%'), 'Not Applicable' for non One-Off, 'Not Specifi
         
 DO NOT just match keywords. ANALYZE THE BUSINESS CONTEXT:
 
+**CRITICAL RULE 1 - PRICE DROP DETECTION:**
+→ If the email mentions "Price Drop", "NLC reduction", "cost reduction", "price protection", or similar:
+  THEN: scheme_type = 'BUY_SIDE' AND scheme_subtype = 'PDC'
+  Do NOT classify as PERIODIC_CLAIM or SELL_SIDE.
+
+**CRITICAL RULE 2 - LIFESTYLE VENDOR DETECTION:**
+→ If the vendor is ANY of these LIFESTYLE brands:
+  - ADITYA BIRLA LIFESTYLE BRANDS LIMITED
+  - ADITYA BIRLA FASHION AND RETAIL LIMITED
+  - MGI DISTRIBUTION PVT LTD
+  - BRAND CONCEPTS LIMITED
+  - Timex Group India Limited
+  - Titan Company Ltd
+  - METRO BRANDS LIMITED
+  - SUMITSU APPAREL PVT. LTD.
+  - Sea Turtle Private Limited
+  THEN: scheme_type = 'SELL_SIDE' AND scheme_subtype = 'LS' (LIFESTYLE)
+  REGARDLESS of other keywords in the email.
+
 **BUY_SIDE** (Claim ID prefix: BS-PC or PDC-PDC)
 → WHAT IT MEANS: Support on PURCHASE/INWARD side. Brand helps Flipkart with purchase costs.
 → BUSINESS CONTEXT: Schemes tied to what Flipkart BUYS from the brand.
@@ -289,7 +308,7 @@ DO NOT just match keywords. ANALYZE THE BUSINESS CONTEXT:
   - JBP/Joint Business Plan, TOT/Terms of Trade
   - Quarterly/Annual business plans (Q1, Q2, FY support)
   - NRV-linked, inwards support, inventory funding
-  - Price Protection/Price Drop on cost side
+  - **Price Protection/Price Drop on cost side** ← ALWAYS PDC SUBTYPE
 
 **SELL_SIDE** (Claim ID prefix: SS-xxx)
 → WHAT IT MEANS: Support on SELLING/OUTWARD side. Brand helps Flipkart sell to customers.
@@ -301,6 +320,7 @@ DO NOT just match keywords. ANALYZE THE BUSINESS CONTEXT:
   - Bank offers (customer payment)
   - Super Coin rewards (customer incentive)
   - Pricing/CP support on selling price
+  - **LIFESTYLE vendors** ← ALWAYS LS SUBTYPE
 
 **OFC** (One-Off Claim)
 → WHAT IT MEANS: One-time, ad-hoc support not tied to regular schemes.
@@ -318,64 +338,90 @@ THINK: Is this about helping purchase (BUY) or helping sell (SELL) or a special 
         desc="""EXPLAIN YOUR SCHEME TYPE DECISION.
         
 Structure:
-1. **Business Direction**: Is support for Flipkart's BUYING or SELLING activity?
-2. **Key Evidence**: What specific phrases/keywords led to this classification?
-3. **Why not others?**: Why did you rule out the other types?
+1. **Rule Check**: Did any CRITICAL RULES apply (Price Drop → PDC, Lifestyle Vendor → LS)?
+2. **Business Direction**: Is support for Flipkart's BUYING or SELLING activity?
+3. **Key Evidence**: What specific phrases/keywords led to this classification?
+4. **Why not others?**: Why did you rule out the other types?
 
-Example: "This is SELL_SIDE because it mentions 'sellout support' and 'customer discounts', indicating support for selling to customers, not purchasing from the brand."
+Example: "This is BUY_SIDE because it mentions 'Price Drop effective from 24th', triggering the Price Drop → PDC rule."
+Example: "This is SELL_SIDE because the vendor is 'Titan Company Ltd' which is a Lifestyle vendor, triggering the Lifestyle → LS rule."
 """
     )
     
     scheme_subtype = dspy.OutputField(
         desc="""CLASSIFY THE SUBTYPE based on scheme_type.
         
+**CRITICAL: Apply these rules FIRST:**
+1. If "Price Drop" mentioned → subtype = 'PDC' (even if other keywords present)
+2. If Lifestyle vendor → subtype = 'LS' (even if other keywords present)
+
 **IF BUY_SIDE, choose one:**
-- 'PERIODIC_CLAIM' (BS-PC)
-- 'PDC' (PDC-PDC)
+- **'PDC'** (PDC-PDC): Price Drop Claim / Price Protection
+  → CRITICAL: ANY mention of "Price Drop", "NLC reduction", "cost reduction" → MUST be PDC
+  → KEYWORDS: Price Drop, Price Protection, Cost Reduction, NLC Change
+  
+- 'PERIODIC_CLAIM' (BS-PC): Quarterly/Annual support schemes
+  → KEYWORDS: JBP, TOT, Q1/Q2 support, Sellin incentive
+  → ONLY if NOT a price drop scenario
 
 **IF SELL_SIDE, choose one of these EXACT CODES:**
-  
-1. **'CP'** (Coupon/VPC): Customer discount via coupon/voucher/code.
-   → KEYWORDS: Coupon, VPC, Voucher, Promo Code.
-   → REASONING: "Mechanism is coupon usage."
 
-2. **'PUC'** (PUC/FDC): Pricing support/Price matching.
-   → KEYWORDS: PUC, FDC, Sellout Support, Price Match, Competitive Pricing.
-   → REASONING: "General pricing support to match competition."
+**CRITICAL RULE 3 - PUC vs CP DISTINCTION:**
+→ **'CP'** (Coupon): ONLY for actual COUPON mechanisms
+   - KEYWORDS: Coupon, VPC, Voucher, Promo Code, Coupon Code
+   - REASONING: "Customer uses a coupon/voucher code at checkout"
+   - NOT for general pricing support!
 
-3. **'PRX'** (Prexo/Exchange): Product Exchange/Buyback.
-   → KEYWORDS: Exchange, Prexo, Upgrade, Buyback, BUP.
-   → REASONING: "Linked to exchanging old devices."
+→ **'PUC'** (PUC/FDC): General pricing/sellout support (CP/Pricing/Sellout Support/rest all)
+   - INCLUDES: CP support (NOT coupon-based), Pricing support, Sellout support, Competitive pricing
+   - KEYWORDS: PUC, FDC, Sellout Support, Price Match, CP (when NOT coupon), Pricing support
+   - REASONING: "General support for selling price, NOT via coupon mechanism"
+   - DEFAULT: Use PUC if unclear between PUC and CP
+
+→ **'LS'** (Lifestyle): LIFESTYLE category vendors
+   - **CRITICAL: ANY of the 9 Lifestyle vendors → MUST be LS**
+   - Vendors: Aditya Birla, MGI Distribution, Brand Concepts, Timex, Titan, Metro Brands, Sumitsu Apparel, Sea Turtle
    
-4. **'SC'** (Super Coin): Super Coin Rewards.
-   → KEYWORDS: Super Coin, SuperCoin, Reward Points.
-   → REASONING: "Funded via Super Coins."
-
-5. **'BOC'** (Bank Offer): Bank or Card specific offer.
-   → KEYWORDS: Bank Offer, Card Offer, EMI Offer, HDFC, ICICI.
-   → REASONING: "Tied to specific bank cards."
-
-6. **'LS'** (Lifestyle): Lifestyle category specific.
-   → KEYWORDS: Lifestyle, Fashion.
+→ 'PRX' (Prexo/Exchange): Product Exchange/Buyback
+   - KEYWORDS: Exchange, Prexo, Upgrade, Buyback, BUP
+   
+→ 'SC' (Super Coin): Super Coin Rewards
+   - KEYWORDS: Super Coin, SuperCoin, Reward Points
+ 
+→ 'BOC' (Bank Offer): Bank or Card specific offer
+   - KEYWORDS: Bank Offer, Card Offer, EMI Offer, HDFC, ICICI
 
 **IF OFC (One-Off):**
 - 'OFC'
 
-OUTPUT: The code ONLY (e.g., 'CP', 'PUC', 'PRX', 'OFC')."""
+OUTPUT: The code ONLY (e.g., 'PDC', 'PUC', 'CP', 'LS', 'PRX', 'OFC')."""
     )
     
     scheme_subtype_reasoning = dspy.OutputField(
         desc="""EXPLAIN YOUR SUBTYPE DECISION (based on the scheme_type you chose).
 
+**MANDATORY CHECKS:**
+1. Did you check for "Price Drop" keywords? → If yes, subtype MUST be PDC
+2. Did you check the vendor against the 9 Lifestyle brands? → If match, subtype MUST be LS
+3. For SELL_SIDE: Did you distinguish between:
+   - CP (actual COUPON mechanism with coupon codes)
+   - PUC (general pricing/sellout support, including non-coupon CP support)
+
 Structure:
-1. **Mechanism Analysis**: What is the specific support mechanism?
-   - For SELL_SIDE: Is it Coupon? Exchange? Bank? Generic pricing?
-   - For BUY_SIDE: Is it periodic or price protection?
-2. **Key Evidence**: What specific words/phrases indicate this mechanism?
-3. **Why this code?**: Why this subtype and not others in the same category?
+1. **Rule Application**: Which critical rules did you apply?
+2. **Mechanism Analysis**: What is the specific support mechanism?
+   - For SELL_SIDE: Is it Coupon (CP)? Or general pricing (PUC)? Or Lifestyle (LS)?
+   - For BUY_SIDE: Is it price drop (PDC)? Or periodic (PERIODIC_CLAIM)?
+3. **Key Evidence**: What specific words/phrases indicate this mechanism?
+4. **Why this code?**: Why this subtype and not others in the same category?
 
-Example for SELL_SIDE: "Subtype is 'CP' because the email explicitly mentions 'VPC codes' and 'customer coupons', indicating a coupon-based mechanism rather than generic pricing support (PUC) or exchange offers (PRX)."
+Example: "Subtype is 'PDC' because the email explicitly states 'Price Drop effective from 24th June', which triggers the Price Drop → PDC rule."
 
-Example for BUY_SIDE: "Subtype is 'PDC' because it mentions 'price drop effective from' and 'cost reduction support', indicating price protection rather than periodic quarterly support."
+Example: "Subtype is 'LS' because the vendor is 'Titan Company Ltd', which is in the Lifestyle vendor list, triggering the Lifestyle → LS rule."
+
+Example: "Subtype is 'PUC' (NOT CP) because while the email mentions 'CP support', there are NO coupon codes or VPC mentioned - this is general pricing support, not a coupon mechanism."
+
+Example: "Subtype is 'CP' because the email contains 'VPC codes' and 'customer coupon vouchers', indicating actual coupon usage mechanism."
 """
     )
+

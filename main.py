@@ -16,7 +16,7 @@ from src.utils.file_handler import FileHandler
 from src.utils.token_tracker import TokenTracker
 from src.extractors.pdf_extractor import PDFExtractor
 from src.extractors.table_extractor import TableExtractor
-from src.cleaners.text_cleaners import ContentCleaner as TextCleaner
+from src.cleaners.deterministic_cleaner import DeterministicContentCleaner as TextCleaner
 
 
 @click.command()
@@ -88,7 +88,7 @@ def main(input_path, output_dir, model, temperature, max_tokens, extract_only, c
     
     # Create per-file output for each PDF
     input_path_obj = Path(input_path).resolve()
-    run_timestamp = datetime.now().strftime("%H%M%S")  # Timestamp for this run
+    run_timestamp = datetime.now().strftime("%d%m%Y_%H%M%S")  # Date+Time for this run
     
     for idx, pdf_file in enumerate(pdf_files, 1):
         # Determine Output Folder Name based on Input Structure
@@ -245,8 +245,16 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
     # Clean text
     stage_start = time.time()
     logger.info("Step 3/5: Cleaning text...", console_only=True)
-    text_cleaner = TextCleaner()
+    text_cleaner = TextCleaner(logger=logger)
     cleaned_text = text_cleaner.clean(raw_text)
+    
+    # Audit logging
+    audit_summary = text_cleaner.get_audit_summary()
+    if audit_summary["removed"] > 0:
+        logger.info(f"Cleaner: Removed {audit_summary['removed']} paragraphs (Boilerplate/Signatures/Headers)")
+        for entry in audit_summary["audit_log"]:
+             logger.debug(f"Audit [{entry['category']}]: Removed '{entry['text_preview']}'")
+
     stats = text_cleaner.get_cleaning_stats(raw_text, cleaned_text)
     logger.log_extraction_summary(num_pages, stats["original_length"], num_tables, stats["cleaned_length"])
     FileHandler.save_text(cleaned_text, file_cleaned_dir / f"{pdf_file.stem}_cleaned.txt")
