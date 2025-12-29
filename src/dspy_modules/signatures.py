@@ -281,10 +281,11 @@ OUTPUT: Percentage (e.g., '18%'), 'Not Applicable' for non One-Off, 'Not Specifi
         
 DO NOT just match keywords. ANALYZE THE BUSINESS CONTEXT:
 
-**CRITICAL RULE 1 - PRICE DROP DETECTION:**
+**CRITICAL RULE 1 - PRICE DROP DETECTION (HIGHEST PRIORITY):**
 → If the email mentions "Price Drop", "NLC reduction", "cost reduction", "price protection", or similar:
-  THEN: scheme_type = 'BUY_SIDE' AND scheme_subtype = 'PDC'
-  Do NOT classify as PERIODIC_CLAIM or SELL_SIDE.
+  THEN: scheme_type = 'PDC' AND scheme_subtype = 'PDC'
+  This is a STANDALONE CATEGORY. Do NOT classify as BUY_SIDE or SELL_SIDE.
+  STOP processing other rules if this matches.
 
 **CRITICAL RULE 2 - LIFESTYLE VENDOR DETECTION:**
 → If the vendor is ANY of these LIFESTYLE brands:
@@ -300,7 +301,15 @@ DO NOT just match keywords. ANALYZE THE BUSINESS CONTEXT:
   THEN: scheme_type = 'SELL_SIDE' AND scheme_subtype = 'LS' (LIFESTYLE)
   REGARDLESS of other keywords in the email.
 
-**BUY_SIDE** (Claim ID prefix: BS-PC or PDC-PDC)
+**PDC** (Price Drop Claim - STANDALONE)
+→ WHAT IT MEANS: Price protection or price drop compensation.
+→ BUSINESS CONTEXT: When supplier reduces price, they compensate for existing stock.
+→ INDICATORS:
+  - "Price Drop", "Price Protection", "NLC reduction"
+  - "Cost reduction", "Price change compensation"
+→ OUTPUT: scheme_type = 'PDC', scheme_subtype = 'PDC'
+
+**BUY_SIDE** (Claim ID prefix: BS-PC)
 → WHAT IT MEANS: Support on PURCHASE/INWARD side. Brand helps Flipkart with purchase costs.
 → BUSINESS CONTEXT: Schemes tied to what Flipkart BUYS from the brand.
 → INDICATORS:
@@ -308,7 +317,7 @@ DO NOT just match keywords. ANALYZE THE BUSINESS CONTEXT:
   - JBP/Joint Business Plan, TOT/Terms of Trade
   - Quarterly/Annual business plans (Q1, Q2, FY support)
   - NRV-linked, inwards support, inventory funding
-  - **Price Protection/Price Drop on cost side** ← ALWAYS PDC SUBTYPE
+→ OUTPUT: scheme_type = 'BUY_SIDE'
 
 **SELL_SIDE** (Claim ID prefix: SS-xxx)
 → WHAT IT MEANS: Support on SELLING/OUTWARD side. Brand helps Flipkart sell to customers.
@@ -321,6 +330,7 @@ DO NOT just match keywords. ANALYZE THE BUSINESS CONTEXT:
   - Super Coin rewards (customer incentive)
   - Pricing/CP support on selling price
   - **LIFESTYLE vendors** ← ALWAYS LS SUBTYPE
+→ OUTPUT: scheme_type = 'SELL_SIDE'
 
 **OFC** (One-Off Claim)
 → WHAT IT MEANS: One-time, ad-hoc support not tied to regular schemes.
@@ -329,9 +339,10 @@ DO NOT just match keywords. ANALYZE THE BUSINESS CONTEXT:
   - 'One off', 'one-off', 'one time'
   - Ad-hoc approval, special sanction
   - Specific amount approved for exception
+→ OUTPUT: scheme_type = 'OFC'
 
-OUTPUT: Exactly 'BUY_SIDE', 'SELL_SIDE', or 'OFC'.
-THINK: Is this about helping purchase (BUY) or helping sell (SELL) or a special exception (OFC)?"""
+OUTPUT: Exactly 'PDC', 'BUY_SIDE', 'SELL_SIDE', or 'OFC'.
+THINK: Is this a Price Drop (PDC)? Or helping purchase (BUY_SIDE)? Or helping sell (SELL_SIDE)? Or special exception (OFC)?"""
     )
     
     scheme_type_reasoning = dspy.OutputField(
@@ -343,7 +354,7 @@ Structure:
 3. **Key Evidence**: What specific phrases/keywords led to this classification?
 4. **Why not others?**: Why did you rule out the other types?
 
-Example: "This is BUY_SIDE because it mentions 'Price Drop effective from 24th', triggering the Price Drop → PDC rule."
+Example: "This is PDC because it mentions 'Price Drop effective from 24th', triggering the Price Drop → PDC rule."
 Example: "This is SELL_SIDE because the vendor is 'Titan Company Ltd' which is a Lifestyle vendor, triggering the Lifestyle → LS rule."
 """
     )
@@ -352,7 +363,7 @@ Example: "This is SELL_SIDE because the vendor is 'Titan Company Ltd' which is a
         desc="""CLASSIFY THE SUBTYPE based on scheme_type.
         
 **CRITICAL: Apply these rules FIRST:**
-1. If "Price Drop" mentioned → subtype = 'PDC' (even if other keywords present)
+1. If "Price Drop" mentioned → scheme_type = 'PDC' AND subtype = 'PDC' (STANDALONE, even if other keywords present)
 2. If Lifestyle vendor → subtype = 'LS' (even if other keywords present)
 
 **IF BUY_SIDE, choose one:**

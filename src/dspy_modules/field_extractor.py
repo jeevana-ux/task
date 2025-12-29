@@ -139,6 +139,11 @@ class RetailerHubFieldExtractor:
             # Capture actual token usage
             token_stats = self._get_actual_token_usage()
             
+            # Check if response was truncated (common issue with Few-Shot)
+            if hasattr(result, 'scheme_type') and result.scheme_type is None:
+                self.logger.warning("⚠️  LLM response appears truncated. Consider increasing --max-tokens (current: {})".format(Config.MAX_TOKENS))
+                self.logger.warning("   Recommendation: --max-tokens 6000 or higher for Few-Shot mode")
+            
             # Extract fields AND reasoning
             fields, reasoning_data = self._extract_all_fields_with_reasoning(result)
             
@@ -214,40 +219,52 @@ class RetailerHubFieldExtractor:
         Extract values and reasoning from DSPy result.
         Returns: (fields_dict, reasoning_dict)
         """
+        # Helper to safely extract attributes (handles None and missing values)
+        def safe_get(attr_name, default=""):
+            value = getattr(result, attr_name, default)
+            if value is None:
+                return default
+            return str(value).strip() if hasattr(value, 'strip') else str(value)
+        
         fields = {
             # Core classification
-            "scheme_type": getattr(result, "scheme_type", "SELL_SIDE").strip(),
-            "scheme_subtype": getattr(result, "scheme_subtype", "PUC").strip(),
+            "scheme_type": safe_get("scheme_type", "SELL_SIDE"),
+            "scheme_subtype": safe_get("scheme_subtype", "PUC"),
             
             # Descriptive fields
-            "scheme_name": getattr(result, "scheme_name", "Unnamed Scheme"),
-            "scheme_description": getattr(result, "scheme_description", "Not specified"),
-            "vendor_name": getattr(result, "vendor_name", "Unknown Vendor"),
+            "scheme_name": safe_get("scheme_name", "Unnamed Scheme"),
+            "scheme_description": safe_get("scheme_description", "Not specified"),
+            "vendor_name": safe_get("vendor_name", "Unknown Vendor"),
             
             # Scheme structure
-            "scheme_period": getattr(result, "scheme_period", Config.DEFAULT_SCHEME_PERIOD),
-            "duration": getattr(result, "duration", "Not Specified"),
-            "discount_type": getattr(result, "discount_type", "Not Specified"),
-            "max_cap": getattr(result, "max_cap", "No Cap"),
+            "scheme_period": safe_get("scheme_period", Config.DEFAULT_SCHEME_PERIOD),
+            "duration": safe_get("duration", "Not Specified"),
+            "discount_type": safe_get("discount_type", "Not Specified"),
+            "max_cap": safe_get("max_cap", "No Cap"),
             
             # Dates (normalized)
-            "price_drop_date": self._normalize_date(getattr(result, "price_drop_date", "N/A")),
-            "start_date": self._normalize_date(getattr(result, "start_date", "Not Specified")),
-            "end_date": self._normalize_date(getattr(result, "end_date", "Not Specified")),
+            "price_drop_date": self._normalize_date(safe_get("price_drop_date", "N/A")),
+            "start_date": self._normalize_date(safe_get("start_date", "Not Specified")),
+            "end_date": self._normalize_date(safe_get("end_date", "Not Specified")),
             
             # Config flags
-            "fsn_file_config_file": getattr(result, "fsn_file_config_file", Config.DEFAULT_FSN_FILE),
-            "min_actual_discount_or_agreed_claim": getattr(result, "min_actual_discount_or_agreed_claim", Config.DEFAULT_MIN_DISCOUNT_CLAIM),
-            "remove_gst_from_final_claim": getattr(result, "remove_gst_from_final_claim", Config.DEFAULT_REMOVE_GST),
-            "over_and_above": getattr(result, "over_and_above", Config.DEFAULT_OVER_ABOVE),
-            "scheme_document": getattr(result, "scheme_document", "No"),
+            "fsn_file_config_file": safe_get("fsn_file_config_file", Config.DEFAULT_FSN_FILE),
+            "min_actual_discount_or_agreed_claim": safe_get("min_actual_discount_or_agreed_claim", Config.DEFAULT_MIN_DISCOUNT_CLAIM),
+            "remove_gst_from_final_claim": safe_get("remove_gst_from_final_claim", Config.DEFAULT_REMOVE_GST),
+            "over_and_above": safe_get("over_and_above", Config.DEFAULT_OVER_ABOVE),
+            "scheme_document": safe_get("scheme_document", "No"),
             
             # Conditional
-            "discount_slab_type": getattr(result, "discount_slab_type", "Not Applicable"),
-            "best_bet": getattr(result, "best_bet", "Not Applicable"),
-            "brand_support_absolute": getattr(result, "brand_support_absolute", "Not Applicable"),
-            "gst_rate": getattr(result, "gst_rate", "Not Applicable")
+            "discount_slab_type": safe_get("discount_slab_type", "Not Applicable"),
+            "best_bet": safe_get("best_bet", "Not Applicable"),
+            "brand_support_absolute": safe_get("brand_support_absolute", "Not Applicable"),
+            "gst_rate": safe_get("gst_rate", "Not Applicable")
         }
+        
+        # CRITICAL POST-PROCESSING OVERRIDE: If scheme_subtype is PDC, force scheme_type to PDC
+        # This ensures consistency regardless of LLM output
+        if fields["scheme_subtype"] == "PDC":
+            fields["scheme_type"] = "PDC"
         
         # Extract Reasoning Map
         reasoning_data = {}
@@ -345,6 +362,12 @@ class RetailerHubFieldExtractor:
     
     def _assess_confidence(self, value: str, reasoning: str) -> str:
         """Simple confidence heuristic based on value and reasoning."""
+        # Handle None values
+        if value is None:
+            value = ""
+        if reasoning is None:
+            reasoning = ""
+            
         value_lower = str(value).lower()
         
         # Low confidence indicators
@@ -352,37 +375,85 @@ class RetailerHubFieldExtractor:
             return "Low"
         
         # Medium if reasoning is brief
-        if len(str(reasoning)) < 50:
+        reasoning_str = str(reasoning) if reasoning else ""
+        if len(reasoning_str) < 50:
             return "Medium"
         
         return "High"
     
     def _build_output(self, fields: Dict) -> Dict:
         """
-        Build final 20-field output JSON.
-        Applies conditional logic based on scheme type.
+        Build final output JSON with strict scheme-specific field filtering.
         """
-        scheme_type = fields["scheme_type"]
-        scheme_subtype = fields["scheme_subtype"]
+        scheme_type = fields.get("scheme_type", "SELL_SIDE")
+        scheme_subtype = fields.get("scheme_subtype", "PUC")
         
-        # Apply conditional field rules
-        if scheme_type == "BUY_SIDE" and scheme_subtype == "PERIODIC_CLAIM":
-            # Keep discount_slab_type and best_bet as extracted
-            pass
-        else:
-            fields["discount_slab_type"] = "Not Applicable"
-            fields["best_bet"] = "Not Applicable"
+        # Base fields always present
+        base_fields = [
+            "scheme_type", "scheme_subtype", "scheme_name", "scheme_description", 
+            "scheme_period", "duration", "discount_type", "vendor_name", 
+            "start_date", "end_date"
+        ]
         
+        # Initialize with base fields
+        final_output = {k: fields.get(k) for k in base_fields}
+        
+        # Helper to add optional fields
+        def add_field(key):
+            final_output[key] = fields.get(key)
+
+        # PDC is a standalone scheme type (scheme_type = PDC, subtype = PDC)
+        # All other schemes: BUY_SIDE, SELL_SIDE, OFC
+        
+        # Logic based on Scheme Type + Sub Type
+        # 1. FSN / Config file: All except OFC
+        if scheme_type not in ["OFC"]:
+            add_field("fsn_file_config_file")
+            
+        # 2. Max Cap / Global Cap Amount: OFC only
         if scheme_type == "OFC":
-            # Keep brand_support_absolute and gst_rate as extracted
-            pass
-        else:
-            fields["brand_support_absolute"] = "Not Applicable"
-            fields["gst_rate"] = "Not Applicable"
-        
-        if scheme_subtype != "PDC":
-            fields["price_drop_date"] = "N/A"
-        
-        # Return clean output (exclude internal reasoning from final JSON)
-        output = {k: v for k, v in fields.items() if k != "classification_reasoning"}
-        return output
+            add_field("max_cap")
+            
+        # 3. Price drop date: PDC only (now standalone: scheme_type == "PDC")
+        if scheme_type == "PDC" or (scheme_type == "BUY_SIDE" and scheme_subtype == "PDC"):
+            add_field("price_drop_date")
+            
+        # 4. Minimum of actual discount OR agreed claim amount: SS-LS, SS-PUC only
+        if scheme_type == "SELL_SIDE" and scheme_subtype in ["LS", "PUC"]:
+            add_field("min_actual_discount_or_agreed_claim")
+            
+        # 5. Remove GST from final claim amount (GST-CHECK): BS-PC, PDC, SS-CP, SS-PRX, SS-PUC, OFC
+        # User's original table: BS-PC, BS-PDC, SS-CP, SS-PRX, SS-PUC, OFC
+        # Now PDC is standalone, so we add scheme_type == "PDC"
+        if scheme_type == "PDC" or \
+           (scheme_type == "BUY_SIDE" and scheme_subtype in ["PERIODIC_CLAIM", "PDC"]) or \
+           (scheme_type == "SELL_SIDE" and scheme_subtype in ["CP", "PRX", "PUC"]) or \
+           (scheme_type == "OFC"):
+            add_field("remove_gst_from_final_claim")
+
+        # 6. Over & Above: BS-PC, PDC, SS-CP, SS-LS, SS-PRX, SS-PUC
+        # User's original: BS-PC, BS-PDC, SS-CP, SS-LS, SS-PRX, SS-PUC (All except OFC and SS-SC)
+        # Now PDC is standalone
+        if scheme_type == "PDC" or \
+           (scheme_type == "BUY_SIDE" and scheme_subtype in ["PERIODIC_CLAIM", "PDC"]) or \
+           (scheme_type == "SELL_SIDE" and scheme_subtype in ["CP", "LS", "PRX", "PUC"]):
+            add_field("over_and_above")
+            
+        # 7. Discount_Slab_type: BS-PC only
+        if scheme_type == "BUY_SIDE" and scheme_subtype == "PERIODIC_CLAIM":
+            add_field("discount_slab_type")
+            
+        # 8. Best_Bet: BS-PC only
+        if scheme_type == "BUY_SIDE" and scheme_subtype == "PERIODIC_CLAIM":
+            add_field("best_bet")
+            
+        # 9. Brand_Support_Absolute: OFC only
+        if scheme_type == "OFC":
+            add_field("brand_support_absolute")
+            
+        # 10. GST Rate: OFC only
+        if scheme_type == "OFC":
+            add_field("gst_rate")
+
+        return final_output
+

@@ -224,54 +224,97 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
     if not stop_early:
         final_root.mkdir(parents=True, exist_ok=True)
     
-    # Extract text
+    # =========================================================================
+    # STAGE 1: PDF TEXT EXTRACTION
+    # =========================================================================
     stage_start = time.time()
-    logger.info(f"\nProcessing: {pdf_file.name}")
-    logger.info("Step 1/5: Extracting text from PDF...", console_only=True)
+    logger.log_stage_start(
+        stage_number=1,
+        stage_name="PDF Text Extraction",
+        description="Reading the PDF file and extracting all text content. We use specialized libraries (PyMuPDF or pdfplumber) to read the PDF pages and convert them to plain text. If the PDF contains scanned images instead of text, we automatically fall back to OCR (Optical Character Recognition)."
+    )
+    
     pdf_extractor = PDFExtractor()
     raw_text, num_pages = pdf_extractor.extract(pdf_file)
-    FileHandler.save_text(raw_text, file_extracted_dir / f"{pdf_file.stem}_raw.txt")
-    logger.log_performance("PDF Text Extraction", time.time() - stage_start)
+    extraction_method = "PyMuPDF" if hasattr(pdf_extractor, '_method') else "pdfplumber"
     
-    # Extract tables
+    # Log extraction details
+    logger.log_pdf_extraction_details(
+        pdf_path=str(pdf_file.name),
+        num_pages=num_pages,
+        text_length=len(raw_text),
+        method=extraction_method
+    )
+    
+    FileHandler.save_text(raw_text, file_extracted_dir / f"{pdf_file.stem}_raw.txt")
+    stage_duration = time.time() - stage_start
+    logger.log_stage_end("PDF Text Extraction", stage_duration, f"Extracted {len(raw_text):,} characters from {num_pages} page(s)")
+    
+    # =========================================================================
+    # STAGE 2: TABLE EXTRACTION
+    # =========================================================================
     stage_start = time.time()
-    logger.info("Step 2/5: Extracting tables...", console_only=True)
+    logger.log_stage_start(
+        stage_number=2,
+        stage_name="Table Extraction",
+        description="Scanning the PDF for any tables (like FSN lists, discount slabs, or pricing data). Tables contain structured data that is crucial for accurate field extraction. We convert tables to CSV format for easy processing."
+    )
+    
     table_extractor = TableExtractor()
     table_csv_path = file_extracted_dir / f"{pdf_file.stem}_tables.csv"
     num_tables = table_extractor.extract_and_consolidate(pdf_file, table_csv_path)
     table_text = FileHandler.read_file(table_csv_path) if num_tables > 0 else ""
-    logger.log_performance("Table Extraction", time.time() - stage_start)
     
-    # Clean text
+    logger.log_table_extraction(num_tables)
+    stage_duration = time.time() - stage_start
+    logger.log_stage_end("Table Extraction", stage_duration, f"Found {num_tables} table(s)")
+    
+    # =========================================================================
+    # STAGE 3: TEXT CLEANING
+    # =========================================================================
     stage_start = time.time()
-    logger.info("Step 3/5: Cleaning text...", console_only=True)
+    logger.log_stage_start(
+        stage_number=3,
+        stage_name="Text Cleaning",
+        description="Removing noise from the extracted text. Email PDFs contain a lot of 'boilerplate' content like signatures, disclaimers, CC lists, and legal notices. This noise would confuse the LLM, so we remove it. Only the core scheme/offer content is kept."
+    )
+    
     text_cleaner = TextCleaner(logger=logger)
     cleaned_text = text_cleaner.clean(raw_text)
     
-    # Audit logging
+    # Get and log cleaning audit
     audit_summary = text_cleaner.get_audit_summary()
     if audit_summary["removed"] > 0:
-        logger.info(f"Cleaner: Removed {audit_summary['removed']} paragraphs (Boilerplate/Signatures/Headers)")
-        for entry in audit_summary["audit_log"]:
-             logger.debug(f"Audit [{entry['category']}]: Removed '{entry['text_preview']}'")
+        logger.log_cleaning_details(
+            removed_items=audit_summary["audit_log"],
+            total_removed=audit_summary["removed"]
+        )
 
     stats = text_cleaner.get_cleaning_stats(raw_text, cleaned_text)
     logger.log_extraction_summary(num_pages, stats["original_length"], num_tables, stats["cleaned_length"])
     FileHandler.save_text(cleaned_text, file_cleaned_dir / f"{pdf_file.stem}_cleaned.txt")
-    logger.log_performance("Text Cleaning", time.time() - stage_start)
     
-    # Process XLSX
+    stage_duration = time.time() - stage_start
+    reduction = ((stats["original_length"] - stats["cleaned_length"]) / stats["original_length"] * 100) if stats["original_length"] > 0 else 0
+    logger.log_stage_end("Text Cleaning", stage_duration, f"Reduced from {stats['original_length']:,} to {stats['cleaned_length']:,} chars ({reduction:.0f}% removed)")
+    
+    # =========================================================================
+    # STAGE 4: XLSX PROCESSING & LLM CONTEXT PREPARATION
+    # =========================================================================
     xlsx_text = ""
     if xlsx_files:
         stage_start = time.time()
-        logger.info("Step 4/5: Processing XLSX files...", console_only=True)
+        logger.log_stage_start(
+            stage_number=4,
+            stage_name="XLSX Processing",
+            description="Processing any Excel files that accompany the PDF. These files may contain DMRP data for Lifestyle schemes, FSN lists, or other supplementary data needed for accurate field extraction."
+        )
         for xlsx_file in xlsx_files:
+            logger.debug(f"Processing XLSX file: {xlsx_file.name}")
             xlsx_text += FileHandler.xlsx_to_text(xlsx_file)
-        logger.log_performance("XLSX Processing", time.time() - stage_start)
+        stage_duration = time.time() - stage_start
+        logger.log_stage_end("XLSX Processing", stage_duration, f"Processed {len(xlsx_files)} XLSX file(s)")
     
-    # LLM extraction
-    stage_start = time.time()
-
     tracker = TokenTracker(model=Config.DEFAULT_MODEL)
     
     # Prepare full context for LLM
@@ -285,6 +328,7 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
     
     # Check if we should stop here (Context Only / Extract Only)
     if stop_early:
+        logger.info("⏸️  Stopping early (extract-only or context-only mode)")
         return {}, {
             "tokens": 0, "cost": 0.0, "time": time.time() - file_start,
             "status": "context_generated", "pdf_file": pdf_file.name,
@@ -292,27 +336,64 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
             "processing_time_seconds": time.time() - file_start
         }
 
-
-
-    # LLM extraction
+    # =========================================================================
+    # STAGE 4/5: LLM FIELD EXTRACTION (DSPy Chain-of-Thought)
+    # =========================================================================
+    stage_start = time.time()
+    logger.log_stage_start(
+        stage_number=4,
+        stage_name="LLM Field Extraction",
+        description="Sending the cleaned text, tables, and XLSX data to a Large Language Model (LLM). The LLM uses Chain-of-Thought reasoning to analyze the content and extract all required fields. If Few-Shot examples are loaded, the LLM will learn from those patterns first."
+    )
+    
     # Lazy import to avoid crash if dspy is broken and we only wanted context
     from src.dspy_modules.field_extractor import RetailerHubFieldExtractor
+    from src.utils.config_generator import ConfigGenerator
     
-    stage_start = time.time()
     field_extractor = RetailerHubFieldExtractor(logger)
+    
+    # Log input context being sent to LLM
+    logger.log_input_context(cleaned_text, table_text, xlsx_text)
+    
     output_json, reasoning_json, actual_token_stats = field_extractor.extract_fields(cleaned_text, table_text, xlsx_text)
-    logger.log_performance("LLM Field Extraction", time.time() - stage_start)
+    
+    stage_duration = time.time() - stage_start
+    fields_extracted = len(output_json)
+    logger.log_stage_end("LLM Field Extraction", stage_duration, f"Extracted {fields_extracted} fields from content")
+    
+    # =========================================================================
+    # STAGE 5: OUTPUT GENERATION & SAVING
+    # =========================================================================
+    stage_start = time.time()
+    logger.log_stage_start(
+        stage_number=5,
+        stage_name="Output Generation",
+        description="Creating the final output files. We generate: (1) The Auto-Punch JSON with all extracted fields, (2) The FSN Config JSON based on scheme type, (3) The Reasoning JSON with full LLM explanations for debugging."
+    )
+    
+    # Generate FSN Config
+    config_json = ConfigGenerator.generate_config(output_json)
+    logger.debug(f"Generated config for scheme type: {output_json.get('scheme_type', 'Unknown')}")
     
     # Save final JSON output (Clean Values)
-    logger.info("Step 5/5: Saving output JSON...", console_only=True)
     final_json_path = final_root / f"{pdf_file.stem}_output.json"
     FileHandler.save_json(json.dumps(output_json, indent=2, ensure_ascii=False), final_json_path)
+    logger.debug(f"Saved output JSON to: {final_json_path}")
+    
+    # Save FSN Config JSON
+    config_json_path = final_root / f"{pdf_file.stem}_config.json"
+    FileHandler.save_json(json.dumps(config_json, indent=2, ensure_ascii=False), config_json_path)
+    logger.debug(f"Saved config JSON to: {config_json_path}")
     
     # Save Reasoning JSON (Values + reasoning + confidence)
     reasoning_json_path = final_root / f"{pdf_file.stem}_reasoning.json"
     FileHandler.save_json(json.dumps(reasoning_json, indent=2, ensure_ascii=False), reasoning_json_path)
+    logger.debug(f"Saved reasoning JSON to: {reasoning_json_path}")
     
-    # Use actual token stats from DSPy if available, otherwise fall back to estimate
+    stage_duration = time.time() - stage_start
+    logger.log_stage_end("Output Generation", stage_duration, f"Created 3 output files in {final_root.name}/")
+    
+    # Log token usage and cost
     if actual_token_stats.get("input_tokens", 0) > 0:
         input_tokens = actual_token_stats["input_tokens"]
         output_tokens = actual_token_stats["output_tokens"]
@@ -328,6 +409,9 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
     
     logger.log_token_usage(input_tokens, output_tokens, total_tokens, tracker.model, cost)
     
+    # Log final output to the log file
+    logger.log_final_output(output_json)
+    
     file_metrics = {
         "file": pdf_file.name, "status": "success", "pages": num_pages, "tables_extracted": num_tables,
         "input_tokens": input_tokens, "output_tokens": output_tokens,
@@ -341,7 +425,7 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
         "metadata": {"pages": num_pages, "tables": num_tables, "processing_time": file_metrics["processing_time_seconds"]}
     }
     
-    logger.success(f"Completed processing for {pdf_file.name}")
+    logger.success(f"✅ Completed processing for {pdf_file.name}")
     return result, file_metrics
 
 
