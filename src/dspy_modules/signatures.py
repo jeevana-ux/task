@@ -59,8 +59,6 @@ EXAMPLE: 'Brand offers 5% sellout support on select SKUs for Q1 visibility campa
         desc="REASONING: What is the core offer? How did you distill the business intent?"
     )
     
-
-    
     # ============================================================================
     # Field 4: Scheme Period Type
     # ============================================================================
@@ -230,24 +228,22 @@ OUTPUT: 'Yes' or 'No'."""
     # Field 17: Discount Slab Type (Buyside-Periodic Only)
     # ============================================================================
     discount_slab_type = dspy.OutputField(
-        desc="""Extract discount slab structure (Buyside-Periodic only).
-FORMAT: Describe tiers, e.g., '0-50L: 2%, 50L-1Cr: 3%'.
-OUTPUT: Slab description, 'Not Applicable' for non-Periodic, 'Not Specified' if no slabs."""
+        desc="""Output 'notApplicable' (fixed value for Buyside-Periodic). 
+        'Not Applicable' for all other scheme types."""
     )
-    discount_slab_reasoning = dspy.OutputField(
-        desc="REASONING: What tiered structure did you find?"
+    discount_slab_type_reasoning = dspy.OutputField(
+        desc="REASONING: For Buyside-Periodic, state that this is a fixed constant requirement."
     )
     
     # ============================================================================
     # Field 18: Best Bet (Buyside-Periodic Only)
     # ============================================================================
     best_bet = dspy.OutputField(
-        desc="""Performance-based incentive (Buyside-Periodic only).
-LOOK FOR: 'best bet', 'performance bonus', 'target achievement'.
-OUTPUT: Description if found, 'No' if not, 'Not Applicable' for non-Periodic."""
+        desc="""Output 'FALSE' (fixed string for Buyside-Periodic). 
+        'Not Applicable' for all other scheme types."""
     )
     best_bet_reasoning = dspy.OutputField(
-        desc="REASONING: Did you find performance-based incentives?"
+        desc="REASONING: For Buyside-Periodic, state that this is a fixed constant requirement."
     )
     
     # ============================================================================
@@ -258,7 +254,7 @@ OUTPUT: Description if found, 'No' if not, 'Not Applicable' for non-Periodic."""
 LOOK FOR: 'approved amount', 'sanctioned Rs.X', 'one-time support'.
 OUTPUT: Number only, 'Not Applicable' for non One-Off."""
     )
-    brand_support_reasoning = dspy.OutputField(
+    brand_support_absolute_reasoning = dspy.OutputField(
         desc="REASONING: What approval amount was stated?"
     )
     
@@ -282,7 +278,7 @@ OUTPUT: Percentage (e.g., '18%'), 'Not Applicable' for non One-Off, 'Not Specifi
 DO NOT just match keywords. ANALYZE THE BUSINESS CONTEXT:
 
 **CRITICAL RULE 1 - PRICE DROP DETECTION (HIGHEST PRIORITY):**
-→ If the email mentions "Price Drop", "NLC reduction", "cost reduction", "price protection", or similar:
+→ If the email mentions "Price drop", "Permanent Price drop", "NLC reduction", "cost reduction", "price protection", or similar:
   THEN: scheme_type = 'PDC' AND scheme_subtype = 'PDC'
   This is a STANDALONE CATEGORY. Do NOT classify as BUY_SIDE or SELL_SIDE.
   STOP processing other rules if this matches.
@@ -298,6 +294,8 @@ DO NOT just match keywords. ANALYZE THE BUSINESS CONTEXT:
   - METRO BRANDS LIMITED
   - SUMITSU APPAREL PVT. LTD.
   - Sea Turtle Private Limited
+  - High Star
+  - Juneberry
   THEN: scheme_type = 'SELL_SIDE' AND scheme_subtype = 'LS' (LIFESTYLE)
   REGARDLESS of other keywords in the email.
 
@@ -305,7 +303,7 @@ DO NOT just match keywords. ANALYZE THE BUSINESS CONTEXT:
 → WHAT IT MEANS: Price protection or price drop compensation.
 → BUSINESS CONTEXT: When supplier reduces price, they compensate for existing stock.
 → INDICATORS:
-  - "Price Drop", "Price Protection", "NLC reduction"
+  - "Price drop", "Permanent Price drop", "Price Protection", "NLC reduction"
   - "Cost reduction", "Price change compensation"
 → OUTPUT: scheme_type = 'PDC', scheme_subtype = 'PDC'
 
@@ -362,77 +360,136 @@ Example: "This is SELL_SIDE because the vendor is 'Titan Company Ltd' which is a
     scheme_subtype = dspy.OutputField(
         desc="""CLASSIFY THE SUBTYPE based on scheme_type.
         
-**CRITICAL: Apply these rules FIRST:**
-1. If "Price Drop" mentioned → scheme_type = 'PDC' AND subtype = 'PDC' (STANDALONE, even if other keywords present)
-2. If Lifestyle vendor → subtype = 'LS' (even if other keywords present)
+**CRITICAL: Priority Rules (Apply in order):**
+1. **PDC Rule**: If "Price drop", "Permanent Price drop", "NLC reduction", "cost reduction", or "price protection" mentioned → subtype MUST be 'PDC'.
+2. **LS Rule**: Subtype MUST be 'LS' if:
+   - Keywords like "SOR", "SOR discounts", "Monsoon Sale", "Monsoon", "Fashion", "Lifestyle", or "Clothing" are present.
+   - OR if no keywords, the vendor identified from the email (check "To:" address) belongs to a LIFESTYLE brand (Aditya Birla, Timex, Titan, Metro, Brand Concepts, beewakoof, Highlander, Leemboodi, High Star, Juneberry etc.).
 
-**IF BUY_SIDE, choose one:**
-- **'PDC'** (PDC-PDC): Price Drop Claim / Price Protection
-  → CRITICAL: ANY mention of "Price Drop", "NLC reduction", "cost reduction" → MUST be PDC
-  → KEYWORDS: Price Drop, Price Protection, Cost Reduction, NLC Change
-  
-- 'PERIODIC_CLAIM' (BS-PC): Quarterly/Annual support schemes
-  → KEYWORDS: JBP, TOT, Q1/Q2 support, Sellin incentive
-  → ONLY if NOT a price drop scenario
+**IF SELL_SIDE (Flipkart Selling Support), choose one of these EXACT CODES:**
 
-**IF SELL_SIDE, choose one of these EXACT CODES:**
+- **'CP'** (Coupon): ONLY when explicit coupon codes (VPC, Promo Code, Voucher Code) are mentioned for customer checkout.
+  → KEYWORDS: Coupon Code, VPC, Voucher Code, Promo Code.
+  → USE THIS ONLY if you see evidence of specific codes customers use at checkout.
 
-**CRITICAL RULE 3 - PUC vs CP DISTINCTION:**
-→ **'CP'** (Coupon): ONLY for actual COUPON mechanisms
-   - KEYWORDS: Coupon, VPC, Voucher, Promo Code, Coupon Code
-   - REASONING: "Customer uses a coupon/voucher code at checkout"
-   - NOT for general pricing support!
+- **'PUC'** (Pricing/Sellout): General pricing, sellout support, price match, or "CP support" where NO coupon code is involved.
+  → INCLUDES: PUC, FDC, Sellout Support, Price Match, CP/Pricing/Sellout Support/rest all.
+  → **DEFAULT**: Use PUC for all general selling price support if no specific codes are mentioned.
 
-→ **'PUC'** (PUC/FDC): General pricing/sellout support (CP/Pricing/Sellout Support/rest all)
-   - INCLUDES: CP support (NOT coupon-based), Pricing support, Sellout support, Competitive pricing
-   - KEYWORDS: PUC, FDC, Sellout Support, Price Match, CP (when NOT coupon), Pricing support
-   - REASONING: "General support for selling price, NOT via coupon mechanism"
-   - DEFAULT: Use PUC if unclear between PUC and CP
+- **'PRX'** (Exchange): Product Exchange / Buyback / Prexo / Upgrade / BUP.
+  → KEYWORDS: Exchange, Prexo, Upgrade, Buyback, BUP, Prexo Bumpup.
 
-→ **'LS'** (Lifestyle): LIFESTYLE category vendors
-   - **CRITICAL: ANY of the 9 Lifestyle vendors → MUST be LS**
-   - Vendors: Aditya Birla, MGI Distribution, Brand Concepts, Timex, Titan, Metro Brands, Sumitsu Apparel, Sea Turtle
-   
-→ 'PRX' (Prexo/Exchange): Product Exchange/Buyback
-   - KEYWORDS: Exchange, Prexo, Upgrade, Buyback, BUP
-   
-→ 'SC' (Super Coin): Super Coin Rewards
-   - KEYWORDS: Super Coin, SuperCoin, Reward Points
- 
-→ 'BOC' (Bank Offer): Bank or Card specific offer
-   - KEYWORDS: Bank Offer, Card Offer, EMI Offer, HDFC, ICICI
+- **'SC'** (SuperCoin): SuperCoin Reward Points support.
+  → KEYWORDS: Super Coin, SuperCoin, Reward Points.
+
+- **'LS'** (Lifestyle): Handled by LS Priority Rule above. Includes Clothing, Watches, Footwear, etc.
+  → KEYWORDS: Lifestyle, Fashion, Clothing, Monsoon Sale, SOR discounts, SOR.
+
+**IF BUY_SIDE (Flipkart Buying Support), choose one:**
+- **'PDC'**: Price Drop / Price protection (Handled by Rule 1).
+- **'PERIODIC_CLAIM'**: Quarterly/Annual/TOT/JBP support (Only if NOT a price drop).
 
 **IF OFC (One-Off):**
 - 'OFC'
 
-OUTPUT: The code ONLY (e.g., 'PDC', 'PUC', 'CP', 'LS', 'PRX', 'OFC')."""
+OUTPUT: One code only (e.g., 'CP', 'PUC', 'PRX', 'SC', 'LS', 'PDC', 'PERIODIC_CLAIM', 'OFC')."""
     )
     
     scheme_subtype_reasoning = dspy.OutputField(
-        desc="""EXPLAIN YOUR SUBTYPE DECISION (based on the scheme_type you chose).
+        desc="""EXPLAIN your subtype decision with focus on SELL_SIDE distinctions.
 
-**MANDATORY CHECKS:**
-1. Did you check for "Price Drop" keywords? → If yes, subtype MUST be PDC
-2. Did you check the vendor against the 9 Lifestyle brands? → If match, subtype MUST be LS
-3. For SELL_SIDE: Did you distinguish between:
-   - CP (actual COUPON mechanism with coupon codes)
-   - PUC (general pricing/sellout support, including non-coupon CP support)
-
-Structure:
-1. **Rule Application**: Which critical rules did you apply?
-2. **Mechanism Analysis**: What is the specific support mechanism?
-   - For SELL_SIDE: Is it Coupon (CP)? Or general pricing (PUC)? Or Lifestyle (LS)?
-   - For BUY_SIDE: Is it price drop (PDC)? Or periodic (PERIODIC_CLAIM)?
-3. **Key Evidence**: What specific words/phrases indicate this mechanism?
-4. **Why this code?**: Why this subtype and not others in the same category?
-
-Example: "Subtype is 'PDC' because the email explicitly states 'Price Drop effective from 24th June', which triggers the Price Drop → PDC rule."
-
-Example: "Subtype is 'LS' because the vendor is 'Titan Company Ltd', which is in the Lifestyle vendor list, triggering the Lifestyle → LS rule."
-
-Example: "Subtype is 'PUC' (NOT CP) because while the email mentions 'CP support', there are NO coupon codes or VPC mentioned - this is general pricing support, not a coupon mechanism."
-
-Example: "Subtype is 'CP' because the email contains 'VPC codes' and 'customer coupon vouchers', indicating actual coupon usage mechanism."
+1. **Rule Check**: Did Rule 1 (PDC) or Rule 2 (LS) apply first? (Mention specifically if LS keywords or the 'To:' email address was the trigger).
+2. **Mechanism Analysis**: If SELL_SIDE, identify the customer-facing mechanism:
+   - Is it actual **Coupon Codes** (CP)? 
+   - Is it general **Pricing/Sellout Support** (PUC)? 
+   - Is it **Exchange/Upgrade** (PRX)?
+   - Is it **SuperCoin Rewards** (SC)?
+   *Note: Many emails say "CP support" but mean general pricing (PUC). Only choose 'CP' if you see customer-facing codes/vouchers.*
+3. **Keyword Evidence**: List the specific phrases from the text that confirm this mechanism (e.g., "Exchange value", "SuperCoin support", "VPC code 'GET100'").
+4. **Exclusion**: Why did you rule out the other Sell-Side types (e.g., Why PUC instead of CP)?
 """
     )
 
+    # ============================================================================
+    # FSN CONFIG FIELDS - Extracted in same LLM call for efficiency
+    # ============================================================================
+    
+    config_brand_support = dspy.OutputField(
+        desc="""Extract the BRAND SUPPORT value (discount/support amount per unit).
+LOOK FOR: 
+- Percentage values: "5% of NLC", "10% off MRP", "Discount of 15%"
+- Absolute values: "Rs.100 per unit", "₹50 support", "Fixed Rs.500"
+- Slab-based: Extract the primary/first slab value
+FORMAT: Return the value as-is (e.g., "5% of NLC", "Rs.100", "15%")
+IF NOT FOUND: Return "Not specified in email"
+"""
+    )
+    config_brand_support_reasoning = dspy.OutputField(
+        desc="REASONING: How did you identify the brand support value? What text indicated this amount?"
+    )
+    
+    config_vendor_split_ratio = dspy.OutputField(
+        desc="""Extract the VENDOR SPLIT RATIO (cost sharing between vendor and Flipkart).
+LOOK FOR:
+- Split mentions: "50:50 sharing", "70-30 split", "Vendor bears 100%"
+- Percentage splits: "80% vendor, 20% FK", "Vendor share: 60%"
+- Common patterns: "Brand funded", "Vendor fully funded" = 100:0
+FORMAT: Return as "X:Y" (e.g., "80:20", "100:0", "50:50")
+IF NOT FOUND: Return "Not specified"
+"""
+    )
+    config_vendor_split_reasoning = dspy.OutputField(
+        desc="REASONING: How did you determine the split ratio? What text indicated the sharing arrangement?"
+    )
+    
+    config_unit_slab_lower = dspy.OutputField(
+        desc="""Extract the LOWER BOUND of the unit/quantity slab.
+LOOK FOR:
+- Slab definitions: "1-100 units", "Min qty: 50", "From 0 to 500"
+- Minimum thresholds: "Above 100 units", "Starting from 1"
+FORMAT: Return numeric value only (e.g., "0", "1", "100")
+IF NOT FOUND: Return "0" as default lower bound
+"""
+    )
+    
+    config_unit_slab_upper = dspy.OutputField(
+        desc="""Extract the UPPER BOUND of the unit/quantity slab.
+LOOK FOR:
+- Slab definitions: "1-100 units", "Max qty: 500", "Up to 1000"
+- Maximum limits: "Quantity cap: 999", "No limit" = "999999"
+FORMAT: Return numeric value only (e.g., "100", "500", "999999")
+IF NOT FOUND: Return "999999" (no upper limit)
+"""
+    )
+    config_slab_reasoning = dspy.OutputField(
+        desc="REASONING: How did you identify the slab bounds? What quantities were mentioned?"
+    )
+    
+    config_max_support_value = dspy.OutputField(
+        desc="""Extract the MAXIMUM SUPPORT VALUE (cap on total support amount).
+LOOK FOR:
+- Max cap mentions: "Max support: Rs.10L", "Cap of ₹50,000", "Global cap: 1Cr"
+- Limit phrases: "Not exceeding", "Up to", "Maximum reimbursement"
+FORMAT: Return the amount (e.g., "Rs.10,00,000", "₹50000", "1Cr")
+IF NOT FOUND: Return "No Cap"
+"""
+    )
+    config_max_support_reasoning = dspy.OutputField(
+        desc="REASONING: How did you find the max support cap? What text indicated this limit?"
+    )
+    
+    config_margin = dspy.OutputField(
+        desc="""Extract the MARGIN percentage (if mentioned).
+LOOK FOR:
+- Margin mentions: "Margin: 8%", "8% margin", "Retail margin of 10%"
+- Profit margins: "Dealer margin", "Trade margin"
+FORMAT: Return percentage value (e.g., "8%", "10%")
+IF NOT FOUND: Return "Not specified"
+"""
+    )
+    config_margin_reasoning = dspy.OutputField(
+        desc="REASONING: How did you identify the margin? What text mentioned margin percentage?"
+    )
+    
+    # Global Logic Summary
+    reasoning = dspy.OutputField(desc="High-level logic summary of the extraction process.")

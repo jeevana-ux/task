@@ -20,7 +20,7 @@ class Config:
     # Model Settings
     DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "openrouter/qwen/qwen3-32b")
     TEMPERATURE = float(os.getenv("TEMPERATURE", "0.1"))
-    MAX_TOKENS = int(os.getenv("MAX_TOKENS", "6000"))
+    MAX_TOKENS = int(os.getenv("MAX_TOKENS", "8000"))
     TOP_P = float(os.getenv("TOP_P", "1.0"))
     FREQUENCY_PENALTY = float(os.getenv("FREQUENCY_PENALTY", "0.0"))
     PRESENCE_PENALTY = float(os.getenv("PRESENCE_PENALTY", "0.0"))

@@ -36,6 +36,30 @@ class FileHandler:
         return output_path
     
     @staticmethod
+    def resolve_prefix(input_path: str, pdf_files: List[Path]) -> str:
+        """
+        Logic to determine a smart prefix for output folders based on input.
+        """
+        input_path_obj = Path(input_path)
+        if input_path_obj.is_file():
+            return input_path_obj.stem
+        elif len(pdf_files) == 1:
+            return pdf_files[0].stem
+        return ""
+
+    @staticmethod
+    def get_output_folder_name(pdf_file: Path, input_root: Path, timestamp: str) -> str:
+        """
+        Determines the output subfolder name based on whether input is flat or nested.
+        """
+        if pdf_file.parent.resolve() == input_root.resolve():
+            # Flat structure
+            return f"{pdf_file.stem}_{timestamp}"
+        else:
+            # Nested structure (use parent folder name)
+            return f"{pdf_file.parent.name}_{timestamp}"
+    
+    @staticmethod
     def get_input_files(input_path: str) -> Tuple[List[Path], List[Path]]:
         """
         Get all PDF and XLSX files from input path.

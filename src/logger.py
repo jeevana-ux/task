@@ -101,6 +101,39 @@ class FieldLevelLogger:
         self._current_stage = ""
         self._stage_count = 0
         self._total_stages = 5  # PDF extraction, table extraction, cleaning, LLM, saving
+
+        # Field descriptions from Retailer Hub documentation (for beginner-friendly logs)
+        self.FIELD_DESCRIPTIONS = {
+            "scheme_name": "Scheme description – usually mail subject line",
+            "scheme_description": "Optional – any important conditions or details mentioned in the brand email",
+            "scheme_period": "Type of period (Duration or Event). Less than 1% of claims are 'Event' based.",
+            "duration": "The validity period of the scheme (start date to end date)",
+            "discount_type": "Basis of calculation: Percentage of NLC (Net Landing Cost), Percentage of MRP, or Absolute amount",
+            "max_cap": "The global cap or maximum support amount mentioned by the brand in the mail",
+            "vendor_name": "Official name of the vendor/brand providing the support",
+            "price_drop_date": "Only applicable for Price Drop Claims (PDC). This is the date the price drop set in.",
+            "start_date": "The start date of the scheme validity period",
+            "end_date": "The end date of the scheme validity period",
+            "fsn_file_config_file": "Indicates if FSN-level configuration files need to be prepared for this scheme",
+            "min_actual_discount_or_agreed_claim": "Must be checked if any limit or cap is mentioned for the discount/claim",
+            "remove_gst_from_final_claim": "Select 'Yes' if prices are inclusive of tax, 'No' if exclusive of tax",
+            "over_and_above": "Set if this is additional support over an existing scheme (overrides duplicity checks)",
+            "scheme_document": "Referenced documents like brand letters or signed agreements",
+            "discount_slab_type": "Used for Buy-side Periodic schemes to define how support scales with quantity",
+            "best_bet": "Optimization flag used for Buy-side Periodic schemes based on mail details",
+            "brand_support_absolute": "The fixed rupee amount of support per unit (typically for One-Off/OFC claims)",
+            "gst_rate": "The applicable GST percentage for the claim amount",
+            "scheme_type": "High-level classification (BUY_SIDE, SELL_SIDE, PDC, etc.)",
+            "scheme_subtype": "Specific claim mechanism (PUC, CP, LS, PRX, etc.)",
+            
+            # Config specifics
+            "config_brand_support": "The specific support value (percentage or absolute) per unit for configuration",
+            "config_vendor_split_ratio": "The funding split between Vendor and Flipkart (e.g., 80:20 means vendor pays 80%)",
+            "config_unit_slab_lower": "The minimum quantity threshold (start) for a specific pricing slab",
+            "config_unit_slab_upper": "The maximum quantity threshold (end) for a specific pricing slab",
+            "config_max_support_value": "The maximum monetary support allowed for this specific configuration",
+            "config_margin": "The profit margin agreed upon for this scheme"
+        }
         
         # Set up file handler for detailed logging
         if log_file:
@@ -702,29 +735,22 @@ class FieldLevelLogger:
         This is the most important logging for debugging LLM outputs.
         For each field, we log:
         - The field name (e.g., "scheme_type", "vendor_name")
+        - The meaning of the field (Beginner-friendly explanation)
         - The LLM's reasoning (WHY it chose this value)
         - The extracted value
         - Confidence level (High/Medium/Low)
-        
-        PARAMETERS:
-        -----------
-        field_name : str
-            Name of the field being extracted
-        input_snippet : str
-            Relevant part of the input text (for context)
-        reasoning : str
-            The LLM's explanation for why it chose this value
-        output_value : Any
-            The extracted value
-        confidence : str
-            How confident we are in this extraction (High/Medium/Low)
         """
         # Handle None values safely
         reasoning = str(reasoning) if reasoning else "No reasoning provided"
         output_value = str(output_value) if output_value else "N/A"
         
-        # Wrap reasoning to fit in the box
+        # Get field meaning/description
+        meaning = self.FIELD_DESCRIPTIONS.get(field_name, "No description available for this field.")
+        
+        # Wrap text to fit in the box
+        meaning_lines = textwrap.wrap(meaning, width=92)
         reasoning_lines = textwrap.wrap(reasoning, width=92)
+        
         if not reasoning_lines:
             reasoning_lines = ["No reasoning provided."]
         
@@ -732,6 +758,14 @@ class FieldLevelLogger:
         log_entry = f"""
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ FIELD: {field_name:<89}│
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                                  │
+│ WHAT THIS FIELD MEANS:                                                                           │
+"""
+        for line in meaning_lines:
+            log_entry += f"│   {line:<93}│\n"
+            
+        log_entry += f"""│                                                                                                  │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                                  │
 │ LLM REASONING (Why this value was chosen):                                                       │

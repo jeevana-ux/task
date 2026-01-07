@@ -53,17 +53,7 @@ def main(input_path, output_dir, model, temperature, max_tokens, extract_only, c
         sys.exit(1)
 
     # Determine output naming prefix
-    # If explicit file path OR detector found exactly one PDF (even in a folder) -> use that filename
-    folder_prefix = ""
-    input_path_obj = Path(input_path)
-    
-    if input_path_obj.is_file():
-        folder_prefix = input_path_obj.stem
-    elif len(pdf_files) == 1:
-        folder_prefix = pdf_files[0].stem
-    
-    # Setup output (just validate base dir exists)
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    folder_prefix = FileHandler.resolve_prefix(input_path, pdf_files)
     
     # We will create loggers per file subsequently
     
@@ -91,18 +81,9 @@ def main(input_path, output_dir, model, temperature, max_tokens, extract_only, c
     run_timestamp = datetime.now().strftime("%d%m%Y_%H%M%S")  # Date+Time for this run
     
     for idx, pdf_file in enumerate(pdf_files, 1):
-        # Determine Output Folder Name based on Input Structure
-        # Case 1: Flat structure (PDF is directly in input_path) -> Output Name: {filename}_{timestamp}_folder
-        # Case 2: Nested structure (PDF is in a subfolder) -> Output Name: {subfolder_name}_{timestamp}
+        output_folder_name = FileHandler.get_output_folder_name(pdf_file, input_path_obj, run_timestamp)
         
-        if pdf_file.parent.resolve() == input_path_obj:
-             # Case 1: Flat input
-             output_folder_name = f"{pdf_file.stem}_{run_timestamp}"
-        else:
-             # Case 2: Nested input (Group Folder)
-             output_folder_name = f"{pdf_file.parent.name}_{run_timestamp}"
-        
-        # Output base: ./outputs/{OutputFolderName}/
+        # Create output path and directory using helper
         file_output_path = Path(output_dir) / output_folder_name
         file_output_path.mkdir(parents=True, exist_ok=True)
         
@@ -120,7 +101,6 @@ def main(input_path, output_dir, model, temperature, max_tokens, extract_only, c
         logger.log_processing_start(pdf_file)
         
         try:
-
             # Determine if we should stop early
             should_stop_early = extract_only or context_only
             
@@ -128,7 +108,6 @@ def main(input_path, output_dir, model, temperature, max_tokens, extract_only, c
             if not should_stop_early:
                 configure_dspy(logger)
                 logger.log_model_params(Config.get_model_params())
-
             result, file_metrics = process_pdf(pdf_file, file_output_path, local_xlsx_files, logger, idx, should_stop_early)
             
             if should_stop_early:
@@ -169,7 +148,7 @@ def configure_dspy(logger):
     try:
         # Set environment variables for OpenRouter/LiteLLM
         os.environ["OPENROUTER_API_KEY"] = Config.OPENROUTER_API_KEY
-        os.environ["OPENAI_API_KEY"] = Config.OPENROUTER_API_KEY
+        #os.environ["OPENAI_API_KEY"] = Config.OPENROUTER_API_KEY
         os.environ["OPENAI_API_BASE"] = Config.OPENROUTER_BASE_URL
         
         # Use dspy.LM for OpenRouter (OpenAI-compatible)
@@ -182,7 +161,7 @@ def configure_dspy(logger):
             max_tokens=Config.MAX_TOKENS,
             top_p=Config.TOP_P
         )
-        
+        #global state setting
         dspy.configure(lm=lm)
         logger.success(f"DSPy configured with model: {Config.DEFAULT_MODEL}")
         
@@ -208,7 +187,6 @@ def configure_dspy(logger):
         except:
             pass
         raise e
-
 
 def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, file_idx: int, stop_early: bool = False):
     """Process single PDF and return results + metrics."""
@@ -343,7 +321,7 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
     logger.log_stage_start(
         stage_number=4,
         stage_name="LLM Field Extraction",
-        description="Sending the cleaned text, tables, and XLSX data to a Large Language Model (LLM). The LLM uses Chain-of-Thought reasoning to analyze the content and extract all required fields. If Few-Shot examples are loaded, the LLM will learn from those patterns first."
+        description="Sending the cleaned text, tables, and XLSX data to a Large Language Model (LLM). The LLM uses Chain-of-Thought reasoning to analyze the content and extract all required fields including FSN config values. If Few-Shot examples are loaded, the LLM will learn from those patterns first."
     )
     
     # Lazy import to avoid crash if dspy is broken and we only wanted context
@@ -355,7 +333,8 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
     # Log input context being sent to LLM
     logger.log_input_context(cleaned_text, table_text, xlsx_text)
     
-    output_json, reasoning_json, actual_token_stats = field_extractor.extract_fields(cleaned_text, table_text, xlsx_text)
+    # Extract fields - returns 4 values: output (filtered), reasoning, tokens, full_fields (includes config_*)
+    output_json, reasoning_json, actual_token_stats, full_fields = field_extractor.extract_fields(cleaned_text, table_text, xlsx_text)
     
     stage_duration = time.time() - stage_start
     fields_extracted = len(output_json)
@@ -368,11 +347,11 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
     logger.log_stage_start(
         stage_number=5,
         stage_name="Output Generation",
-        description="Creating the final output files. We generate: (1) The Auto-Punch JSON with all extracted fields, (2) The FSN Config JSON based on scheme type, (3) The Reasoning JSON with full LLM explanations for debugging."
+        description="Creating the final output files. We generate: (1) The Auto-Punch JSON with all extracted fields, (2) The FSN Config JSON with LLM-extracted values, (3) The Reasoning JSON with full LLM explanations for debugging."
     )
     
-    # Generate FSN Config
-    config_json = ConfigGenerator.generate_config(output_json)
+    # Generate FSN Config using full_fields (which includes config_* fields from LLM)
+    config_json = ConfigGenerator.generate_config(full_fields)
     logger.debug(f"Generated config for scheme type: {output_json.get('scheme_type', 'Unknown')}")
     
     # Save final JSON output (Clean Values)

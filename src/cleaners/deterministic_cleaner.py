@@ -104,6 +104,7 @@ class DeterministicContentCleaner:
         
         # Step 2: Preprocess (before segmentation)
         text = self._preprocess_cc_removal(text)
+        text = self._preprocess_from_to_removal(text)
         text = self._preprocess_disclaimer_removal(text)
         
         # Step 3: Segment
@@ -147,12 +148,12 @@ class DeterministicContentCleaner:
     def _normalize_text(self, text: str) -> str:
         """Normalize Unicode and remove OCR artifacts."""
         text = unicodedata.normalize('NFKC', text)
-        text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
-        text = re.sub(r'[\u200B-\u200D\uFEFF]', '', text)
-        text = re.sub(r'\u00AD', '', text)
-        text = re.sub(r'[\u2028\u2029]', '\n', text)
-        text = text.replace('\u00A0', ' ')
-        text = text.replace('\u2011', '-')
+        text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text) #stripping control chars
+        text = re.sub(r'[\u200B-\u200D\uFEFF]', '', text) #Invisible char removal
+        text = re.sub(r'\u00AD', '', text) #hyphenation
+        text = re.sub(r'[\u2028\u2029]', '\n', text) #standardize line breaks
+        text = text.replace('\u00A0', ' ') #Space normalization
+        text = text.replace('\u2011', '-') #Hyphen normalization
         return text
     
     def _preprocess_cc_removal(self, text: str) -> str:
@@ -181,6 +182,58 @@ class DeterministicContentCleaner:
                     continue
                 else:
                     skip_cc_block = False
+            
+            cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines)
+    
+    def _preprocess_from_to_removal(self, text: str) -> str:
+        """
+        Safely removes From: and To: address headers, including multi-line lists.
+        Handles cases like:
+        From: Name <email@domain.com>
+        To: Recipient 1 <r1@domain.com>,
+            Recipient 2 <r2@domain.com>
+        """
+        lines = text.split('\n')
+        cleaned_lines = []
+        skip_block = False
+        
+        # Pattern to match start of header
+        header_pattern = re.compile(r'(?i)^(From|To)\s*:', re.IGNORECASE)
+        # Pattern to identify continuation (emails or comma-separated names)
+        email_pattern = re.compile(r'[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}', re.IGNORECASE)
+        
+        for line in lines:
+            line_stripped = line.strip()
+            
+            # Detect start of an address header
+            if header_pattern.match(line_stripped):
+                skip_block = True
+                self.audit_summary["removed"] += 1
+                if self.logger:
+                    self.logger.debug(f"[Address] Removing header: {line_stripped[:50]}...")
+                continue
+            
+            # Handle potential multi-line continuation
+            if skip_block:
+                if not line_stripped:
+                    # Empty line reliably ends a header block
+                    skip_block = False
+                else:
+                    # Check if this line is a continuation of the address list
+                    has_email = bool(email_pattern.search(line_stripped))
+                    is_list_continuation = line_stripped.endswith((',', ';')) or '<' in line_stripped or '>' in line_stripped
+                    
+                    if has_email or is_list_continuation:
+                        if self.logger:
+                            self.logger.debug(f"[Address Cont] Removing continuation: {line_stripped[:30]}...")
+                        # Not incrementing 'removed' count for every line to avoid skewing stats, 
+                        # usually the header block counts as one removal event.
+                        continue
+                    else:
+                        # Line doesn't look like an address continuation, stop skipping
+                        skip_block = False
             
             cleaned_lines.append(line)
         

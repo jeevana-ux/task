@@ -27,7 +27,7 @@ def optimize_extractor():
             model=Config.DEFAULT_MODEL,
             api_key=Config.OPENROUTER_API_KEY,
             api_base=Config.OPENROUTER_BASE_URL,
-            max_tokens=4000
+            max_tokens=Config.MAX_TOKENS
         )
     except AttributeError:
         # Fallback for older versions just in case

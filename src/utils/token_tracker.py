@@ -36,8 +36,8 @@ class TokenTracker:
         "qwen/qwen-2.5-7b-instruct": (0.01, 0.01),
         
         # Alias for user's specific string "qwen/qwen3-32b" (mapped to Qwen 2.5 32B pricing approx)
-        "openrouter/qwen/qwen3-32b": (0.07, 0.13), 
-        "qwen/qwen3-32b": (0.07, 0.13),
+        "openrouter/qwen/qwen3-32b": (0.08, 0.24), 
+        "qwen/qwen3-32b": (0.08, 0.24),
     }
     
     def __init__(self, model: str = "openai/gpt-4o"):

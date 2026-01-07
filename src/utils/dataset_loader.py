@@ -44,12 +44,18 @@ def load_dataset(json_file_path: str) -> List[dspy.Example]:
             # Direct text content (not a file reference)
             email_text = input_ref
         
-        # 2. Prepare Inputs
-        # We ensure all inputs defined in the Signature are present
+        # 2. Prepare Inputs (With Token Optimization)
+        def truncate_context(text, max_lines=50):
+            if not text: return text
+            l = str(text).splitlines()
+            if len(l) > max_lines:
+                return "\n".join(l[:max_lines]) + "\n... [TRUNCATED]"
+            return text
+
         inputs = {
-            "email_text": email_text,
-            "table_data": item.get("table_data", "No table data available"),
-            "xlsx_data": item.get("xlsx_data", "No XLSX data provided")
+            "email_text": truncate_context(email_text, max_lines=100), # Emails can be slightly longer
+            "table_data": truncate_context(item.get("table_data", "No table data available"), max_lines=30),
+            "xlsx_data": truncate_context(item.get("xlsx_data", "No XLSX data provided"), max_lines=30)
         }
         
         # 3. Prepare Labels

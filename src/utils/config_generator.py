@@ -1,18 +1,20 @@
 """
 Configuration Generator for Retailer Hub
-Generates scheme-specific configuration JSONs based on scheme type and subtype.
+Generates scheme-specific configuration JSONs using LLM-extracted fields.
 """
 from typing import Dict, Any, List
 
 class ConfigGenerator:
     """
     Generates FSN/Scheme Configuration files based on scheme classification.
+    Now uses LLM-extracted config_ fields for actual values instead of placeholders.
     """
     
     @staticmethod
     def generate_config(fields: Dict[str, Any]) -> Dict[str, Any]:
         """
         Generate the configuration JSON structure based on scheme type and subtype.
+        Uses LLM-extracted config_* fields for actual values.
         """
         scheme_type = fields.get("scheme_type", "")
         scheme_subtype = fields.get("scheme_subtype", "")
@@ -53,18 +55,24 @@ class ConfigGenerator:
 
         return {"error": f"Unknown scheme configuration for {scheme_type} - {scheme_subtype}"}
 
-
+    @staticmethod
+    def _get_config_field(fields: Dict, config_key: str, fallback: str = "Not specified") -> str:
+        """Helper to get LLM-extracted config field with fallback."""
+        value = fields.get(config_key, fallback)
+        return value if value else fallback
 
     @staticmethod
     def _gen_PDC(fields: Dict) -> Dict:
         """Generate config for PDC (Price Drop Claim) - standalone scheme type"""
         return {
             "config_type": "PDC",
+            "extraction_source": "LLM",
             "fields": {
-                "ProductId": "Derived from FSN File",
-                "brandSupport": "Derived from Price Drop Amount",
-                "maxQuantity": "Derived from Stock/Sales",
-                "priceDropDate": fields.get("price_drop_date", "N/A")
+                "ProductId": "Populate from FSN File",
+                "brandSupport": ConfigGenerator._get_config_field(fields, "config_brand_support"),
+                "maxQuantity": ConfigGenerator._get_config_field(fields, "config_unit_slab_upper", "999999"),
+                "priceDropDate": fields.get("price_drop_date", "N/A"),
+                "maxSupportValue": ConfigGenerator._get_config_field(fields, "config_max_support_value", "No Cap")
             }
         }
 
@@ -72,12 +80,13 @@ class ConfigGenerator:
     def _gen_BUY_SIDE_PERIODIC_CLAIM(fields: Dict) -> Dict:
         return {
             "config_type": "BS-PC",
+            "extraction_source": "LLM",
             "fields": {
-                "ProductId": "Derived from FSN File",
-                "unitSlabUpper": "Derived from Slabs",
-                "unitSlabLower": "Derived from Slabs",
-                "brandSupport": "Derived from Scheme Terms",
-                "maxSupportValue": fields.get("max_cap", "No Cap"),
+                "ProductId": "Populate from FSN File",
+                "unitSlabLower": ConfigGenerator._get_config_field(fields, "config_unit_slab_lower", "0"),
+                "unitSlabUpper": ConfigGenerator._get_config_field(fields, "config_unit_slab_upper", "999999"),
+                "brandSupport": ConfigGenerator._get_config_field(fields, "config_brand_support"),
+                "maxSupportValue": ConfigGenerator._get_config_field(fields, "config_max_support_value", "No Cap"),
                 "bestBetQuantity": fields.get("best_bet", "N/A")
             }
         }
@@ -86,10 +95,12 @@ class ConfigGenerator:
     def _gen_BUY_SIDE_PDC(fields: Dict) -> Dict:
         return {
             "config_type": "BS-PDC",
+            "extraction_source": "LLM",
             "fields": {
-                "ProductId": "Derived from FSN File",
-                "brandSupport": "Derived from Price Drop",
-                "maxQuantity": "Derived from Stock/Sales"
+                "ProductId": "Populate from FSN File",
+                "brandSupport": ConfigGenerator._get_config_field(fields, "config_brand_support"),
+                "maxQuantity": ConfigGenerator._get_config_field(fields, "config_unit_slab_upper", "999999"),
+                "maxSupportValue": ConfigGenerator._get_config_field(fields, "config_max_support_value", "No Cap")
             }
         }
 
@@ -97,10 +108,11 @@ class ConfigGenerator:
     def _gen_SELL_SIDE_CP(fields: Dict) -> Dict:
         return {
             "config_type": "SS-CP",
+            "extraction_source": "LLM",
             "fields": {
-                "ProductId": "Derived from FSN File",
-                "brandSupport": "Derived from Coupon Value",
-                "vendorSplitRatio": "Derived from Sharing %"
+                "ProductId": "Populate from FSN File",
+                "brandSupport": ConfigGenerator._get_config_field(fields, "config_brand_support"),
+                "vendorSplitRatio": ConfigGenerator._get_config_field(fields, "config_vendor_split_ratio")
             }
         }
 
@@ -108,15 +120,15 @@ class ConfigGenerator:
     def _gen_SELL_SIDE_PUC(fields: Dict) -> Dict:
         return {
             "config_type": "SS-PUC",
+            "extraction_source": "LLM",
             "fields": {
-                "ProductId": "Derived from FSN File",
-                "brandSupport": "Derived from Support Amount",
-                "vendorSplitRatio": "Derived from Sharing %",
-                "unitSlabUpper": "Derived from Slabs",
-                "unitSlabLower": "Derived from Slabs",
-                "maxSupportValue": fields.get("max_cap", "No Cap"),
-                "maxCapFKFunding": "Derived from Agreement",
-                "margin": "Derived from Margin"
+                "ProductId": "Populate from FSN File",
+                "brandSupport": ConfigGenerator._get_config_field(fields, "config_brand_support"),
+                "vendorSplitRatio": ConfigGenerator._get_config_field(fields, "config_vendor_split_ratio"),
+                "unitSlabLower": ConfigGenerator._get_config_field(fields, "config_unit_slab_lower", "0"),
+                "unitSlabUpper": ConfigGenerator._get_config_field(fields, "config_unit_slab_upper", "999999"),
+                "maxSupportValue": ConfigGenerator._get_config_field(fields, "config_max_support_value", "No Cap"),
+                "margin": ConfigGenerator._get_config_field(fields, "config_margin")
             }
         }
 
@@ -124,13 +136,14 @@ class ConfigGenerator:
     def _gen_SELL_SIDE_PRX(fields: Dict) -> Dict:
         return {
             "config_type": "SS-PRX",
+            "extraction_source": "LLM",
             "fields": {
-                "ProductId": "Derived from FSN File",
-                "incomingFsn": "Derived from Exchange logic",
-                "vendorSplitRatio": "Derived from Sharing %",
-                "exchangeSlabFrom": "Derived from Slabs",
-                "exchangeSlabTo": "Derived from Slabs",
-                "agreedSupport": "Derived from Support Amount"
+                "ProductId": "Populate from FSN File",
+                "incomingFsn": "Populate from Exchange FSN File",
+                "vendorSplitRatio": ConfigGenerator._get_config_field(fields, "config_vendor_split_ratio"),
+                "exchangeSlabFrom": ConfigGenerator._get_config_field(fields, "config_unit_slab_lower", "0"),
+                "exchangeSlabTo": ConfigGenerator._get_config_field(fields, "config_unit_slab_upper", "999999"),
+                "agreedSupport": ConfigGenerator._get_config_field(fields, "config_brand_support")
             }
         }
         
@@ -138,8 +151,10 @@ class ConfigGenerator:
     def _gen_SELL_SIDE_SC(fields: Dict) -> Dict:
         return {
              "config_type": "SS-SC",
+             "extraction_source": "LLM",
              "fields": {
-                 "ProductId": "Derived from FSN File"
+                 "ProductId": "Populate from FSN File",
+                 "brandSupport": ConfigGenerator._get_config_field(fields, "config_brand_support")
              }
         }
 
@@ -147,16 +162,18 @@ class ConfigGenerator:
     def _gen_SELL_SIDE_LS(fields: Dict) -> Dict:
         return {
             "config_type": "SS-LS",
-            "description": "Lifestyle Scheme - DMRP details to be populated from DMRP file",
+            "extraction_source": "LLM",
+            "description": "Lifestyle Scheme - DMRP details may need manual population from DMRP file",
             "fields": {
-                "ProductId": "Derived from FSN File",
-                "unitSlabLower": "Derived from Slabs",
-                "unitSlabUpper": "Derived from Slabs",
-                "brandSupport": "Derived from Support",
-                "vendorSplitRatio": "Derived from Sharing %",
-                "margin": "Derived from Margin",
-                "dmrpType": "Derived from DMRP File",
-                "dmrpValue": "Derived from DMRP File",
-                "maxSupportValue": fields.get("min_actual_discount_or_agreed_claim", "N/A")
+                "ProductId": "Populate from FSN File",
+                "unitSlabLower": ConfigGenerator._get_config_field(fields, "config_unit_slab_lower", "0"),
+                "unitSlabUpper": ConfigGenerator._get_config_field(fields, "config_unit_slab_upper", "999999"),
+                "brandSupport": ConfigGenerator._get_config_field(fields, "config_brand_support"),
+                "vendorSplitRatio": ConfigGenerator._get_config_field(fields, "config_vendor_split_ratio"),
+                "margin": ConfigGenerator._get_config_field(fields, "config_margin"),
+                "dmrpType": "Manual - From DMRP File",
+                "dmrpValue": "Manual - From DMRP File",
+                "maxSupportValue": ConfigGenerator._get_config_field(fields, "config_max_support_value", 
+                                  fields.get("min_actual_discount_or_agreed_claim", "N/A"))
             }
         }

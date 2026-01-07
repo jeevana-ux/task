@@ -33,19 +33,20 @@ def normalize_date(date_str):
          return f"{int(d):02d}/{int(m):02d}/{y}"
     return date_str
 
-# --- Metric Function ---
-
 # --- Normalization Helpers ---
 
 def normalize_scheme_type(val):
-    """Normalize scheme type to standard model outputs: BUY_SIDE, SELL_SIDE, OFC."""
+    """Normalize scheme type to standard model outputs: BUY_SIDE, SELL_SIDE, OFC, PDC."""
     v = str(val).strip().upper()
     
+    # PDC variations
+    if v in ['PDC', 'PDC-PDC', 'PRICE_DROP']: return 'PDC'
+    
     # BUY_SIDE variations
-    if v in ['BUY_SIDE', 'BS', 'BS-PC', 'PDC-PDC', 'BUY SIDE']: return 'BUY_SIDE'
+    if v in ['BUY_SIDE', 'BS', 'BUY SIDE']: return 'BUY_SIDE'
     
     # SELL_SIDE variations
-    if v in ['SELL_SIDE', 'SS', 'SS-CP', 'SS-PUC', 'SS-PRX', 'SS-SC', 'SS-BOC', 'SS-LS', 'SELL SIDE']: return 'SELL_SIDE'
+    if v in ['SELL_SIDE', 'SS', 'SELL SIDE']: return 'SELL_SIDE'
     
     # OFC variations
     if v in ['OFC', 'ONE_OFF', 'ONE OFF', 'OFC-OFC']: return 'OFC'
@@ -53,11 +54,13 @@ def normalize_scheme_type(val):
     return v.lower() # Fallback
 
 def normalize_scheme_subtype(val):
-    """Normalize subtype to standard codes: CP, PUC, PRX, SC, BOC, LS, PDC, PERIODIC_CLAIM, OFC."""
+    """Normalize subtype to standard codes: CP, PUC, PRX, SC, LS, PDC, PERIODIC_CLAIM, OFC."""
     v = str(val).strip().upper()
     
     # BUY_SIDE Subtypes
-    if v in ['PERIODIC_CLAIM', 'BS-PC', 'PERIODIC CLAIM']: return 'PERIODIC_CLAIM'
+    if v in ['PERIODIC_CLAIM', 'BS-PC', 'PERIODIC CLAIM', 'PC']: return 'PERIODIC_CLAIM'
+    
+    # STANDALONE or Both
     if v in ['PDC', 'PDC-PDC']: return 'PDC'
     
     # SELL_SIDE Subtypes
@@ -65,7 +68,6 @@ def normalize_scheme_subtype(val):
     if v in ['PUC', 'PUC_FDC', 'SS-PUC', 'PRICE MATCH']: return 'PUC'
     if v in ['PRX', 'PREXO', 'SS-PRX', 'EXCHANGE']: return 'PRX'
     if v in ['SC', 'SUPER_COIN', 'SS-SC', 'SUPER COIN']: return 'SC'
-    if v in ['BOC', 'BANK OFFERS', 'SS-BOC', 'BANK OFFER']: return 'BOC'
     if v in ['LS', 'LIFESTYLE', 'SS-LS']: return 'LS'
     
     # OFC Subtypes
@@ -73,45 +75,10 @@ def normalize_scheme_subtype(val):
     
     return v.lower() # Fallback
 
-# --- Metric Function ---
-
-# --- Normalization Helpers ---
-
-def normalize_scheme_type(val):
-    """Normalize scheme type to standard model outputs: BUY_SIDE, SELL_SIDE, OFC."""
-    v = str(val).strip().upper()
-    
-    # BUY_SIDE variations
-    if v in ['BUY_SIDE', 'BS', 'BS-PC', 'PDC-PDC', 'BUY SIDE', 'PDC']: return 'BUY_SIDE'
-    
-    # SELL_SIDE variations
-    if v in ['SELL_SIDE', 'SS', 'SS-CP', 'SS-PUC', 'SS-PRX', 'SS-SC', 'SS-BOC', 'SS-LS', 'SELL SIDE']: return 'SELL_SIDE'
-    
-    # OFC variations
-    if v in ['OFC', 'ONE_OFF', 'ONE OFF', 'OFC-OFC']: return 'OFC'
-    
-    return v.lower() # Fallback
-
-def normalize_scheme_subtype(val):
-    """Normalize subtype to standard codes."""
-    v = str(val).strip().upper()
-    
-    if v in ['PERIODIC_CLAIM', 'BS-PC', 'PERIODIC CLAIM', 'PC']: return 'PERIODIC_CLAIM'
-    if v in ['PDC', 'PDC-PDC']: return 'PDC'
-    if v in ['CP', 'COUPON', 'SS-CP', 'VPC']: return 'CP'
-    if v in ['PUC', 'PUC_FDC', 'SS-PUC', 'PRICE MATCH']: return 'PUC'
-    if v in ['PRX', 'PREXO', 'SS-PRX', 'EXCHANGE']: return 'PRX'
-    if v in ['SC', 'SUPER_COIN', 'SS-SC', 'SUPER COIN']: return 'SC'
-    if v in ['BOC', 'BANK OFFERS', 'SS-BOC', 'BANK OFFER']: return 'BOC'
-    if v in ['LS', 'LIFESTYLE', 'SS-LS']: return 'LS'
-    if v in ['OFC', 'ONE_OFF', 'ONE OFF', 'OFC-OFC']: return 'OFC'
-    
-    return v.lower()
-
 def normalize_na(val):
     """Normalize 'Not Applicable' variations."""
     v = str(val).strip().lower()
-    if v in ['not applicable', 'n/a', 'none', 'no', 'nofield', 'nan', '']:
+    if v in ['not applicable', 'n/a', 'none', 'no', 'nofield', 'nan', '', 'notapplicable']:
         return 'not applicable'
     return v
 
