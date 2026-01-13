@@ -14,6 +14,7 @@ from src.config import Config
 from src.logger import create_logger
 from src.utils.file_handler import FileHandler
 from src.utils.token_tracker import TokenTracker
+from src.utils.mapping_manager import MappingManager
 from src.extractors.pdf_extractor import PDFExtractor
 from src.extractors.table_extractor import TableExtractor
 from src.cleaners.deterministic_cleaner import DeterministicContentCleaner as TextCleaner
@@ -202,6 +203,13 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
     if not stop_early:
         final_root.mkdir(parents=True, exist_ok=True)
     
+    # Initialize Mapping Manager
+    mapping_manager = MappingManager(
+        fsn_mapping_path="mapping/FSN Model mapping.xlsx.ods",
+        ls_mapping_path="mapping/DMRP data_Lifestyle 24-25.ods",
+        logger=logger
+    )
+    
     # =========================================================================
     # STAGE 1: PDF TEXT EXTRACTION
     # =========================================================================
@@ -341,36 +349,72 @@ def process_pdf(pdf_file: Path, output_root: Path, xlsx_files: list, logger, fil
     logger.log_stage_end("LLM Field Extraction", stage_duration, f"Extracted {fields_extracted} fields from content")
     
     # =========================================================================
-    # STAGE 5: OUTPUT GENERATION & SAVING
+    # STAGE 5: OUTPUT GENERATION & ENRICHMENT
     # =========================================================================
     stage_start = time.time()
     logger.log_stage_start(
         stage_number=5,
-        stage_name="Output Generation",
-        description="Creating the final output files. We generate: (1) The Auto-Punch JSON with all extracted fields, (2) The FSN Config JSON with LLM-extracted values, (3) The Reasoning JSON with full LLM explanations for debugging."
+        stage_name="Output Generation & Mapping",
+        description="Enriching the extracted data with internal master mappings (FSN lookups, Margin/DMRP enrichment) and generating the final Retailer Hub configuration files. Multi-period schemes will trigger separate configuration files."
     )
     
-    # Generate FSN Config using full_fields (which includes config_* fields from LLM)
-    config_json = ConfigGenerator.generate_config(full_fields)
-    logger.debug(f"Generated config for scheme type: {output_json.get('scheme_type', 'Unknown')}")
+    # 1. Resolve FSNs (PDF -> Model Lookup)
+    model_name = full_fields.get("model_name", "Not Specified")
+    extracted_fsns_str = full_fields.get("extracted_fsns", "None")
+    resolved_fsns = mapping_manager.resolve_fsns(model_name, extracted_fsns_str)
+    full_fields["resolved_fsns"] = resolved_fsns
     
-    # Save final JSON output (Clean Values)
+    # 2. Extract City-based Enrichment (For SS-LS or Regional Offers)
+    city_name = full_fields.get("cities_locations", "National")
+    vendor_name = full_fields.get("vendor_name", "Unknown")
+    enrichment_data = {}
+    if output_json.get("scheme_type") == "SELL_SIDE" and output_json.get("scheme_subtype") == "LS":
+        enrichment_data = mapping_manager.get_ls_enrichment(vendor_name, city_name)
+        logger.info(f"✨ Enriched Lifestyle data for {vendor_name} ({len(enrichment_data)} fields added)")
+    
+    # 3. Handle Multi-Period Splitting
+    sub_periods_str = full_fields.get("sub_periods", "Single Period")
+    periods = []
+    if sub_periods_str and sub_periods_str.lower() != "single period":
+        # Expecting 'DD/MM/YYYY to DD/MM/YYYY; ...'
+        raw_periods = sub_periods_str.split(';')
+        for p in raw_periods:
+            if "to" in p.lower():
+                s, e = p.lower().split("to")
+                periods.append({"start_date": s.strip(), "end_date": e.strip()})
+    
+    # If no valid sub-periods found, default to the main start/end dates
+    if not periods:
+        periods = [{"start_date": full_fields.get("start_date"), "end_date": full_fields.get("end_date")}]
+
+    # 4. Generate Config Files (One per Period)
+    config_paths = []
+    for i, period in enumerate(periods):
+        period_fields = full_fields.copy()
+        period_fields["start_date"] = period["start_date"]
+        period_fields["end_date"] = period["end_date"]
+        
+        config_json = ConfigGenerator.generate_config(period_fields, enrichment_data)
+        
+        suffix = f"_P{i+1}" if len(periods) > 1 else ""
+        period_config_path = final_root / f"{pdf_file.stem}_config{suffix}.json"
+        FileHandler.save_json(json.dumps(config_json, indent=2, ensure_ascii=False), period_config_path)
+        config_paths.append(period_config_path)
+        
+    logger.debug(f"Generated {len(config_paths)} configuration file(s)")
+
+    # Save final JSON output (Auto-Punch fields)
     final_json_path = final_root / f"{pdf_file.stem}_output.json"
+    # Update output_json with resolved FSNs for visibility
+    output_json["resolved_fsns"] = resolved_fsns
     FileHandler.save_json(json.dumps(output_json, indent=2, ensure_ascii=False), final_json_path)
-    logger.debug(f"Saved output JSON to: {final_json_path}")
     
-    # Save FSN Config JSON
-    config_json_path = final_root / f"{pdf_file.stem}_config.json"
-    FileHandler.save_json(json.dumps(config_json, indent=2, ensure_ascii=False), config_json_path)
-    logger.debug(f"Saved config JSON to: {config_json_path}")
-    
-    # Save Reasoning JSON (Values + reasoning + confidence)
+    # Save Reasoning JSON
     reasoning_json_path = final_root / f"{pdf_file.stem}_reasoning.json"
     FileHandler.save_json(json.dumps(reasoning_json, indent=2, ensure_ascii=False), reasoning_json_path)
-    logger.debug(f"Saved reasoning JSON to: {reasoning_json_path}")
     
     stage_duration = time.time() - stage_start
-    logger.log_stage_end("Output Generation", stage_duration, f"Created 3 output files in {final_root.name}/")
+    logger.log_stage_end("Output Generation", stage_duration, f"Created {len(config_paths) + 2} output files in {final_root.name}/")
     
     # Log token usage and cost
     if actual_token_stats.get("input_tokens", 0) > 0:

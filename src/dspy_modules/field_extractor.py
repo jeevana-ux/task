@@ -87,7 +87,12 @@ class RetailerHubFieldExtractor:
         "config_unit_slab_lower": "config_slab_reasoning",
         "config_unit_slab_upper": "config_slab_reasoning",
         "config_max_support_value": "config_max_support_reasoning",
-        "config_margin": "config_margin_reasoning"
+        "config_margin": "config_margin_reasoning",
+        # New Domain Fields
+        "model_name": "model_name", # No separate reasoning field for brevity
+        "extracted_fsns": "extracted_fsns",
+        "cities_locations": "cities_locations",
+        "sub_periods": "sub_periods"
     }
 
     def extract_fields(
@@ -169,60 +174,92 @@ class RetailerHubFieldExtractor:
             all_fields, reasoning_data = self._extract_all_fields_with_reasoning(result)
             
             # STIRCT DETERMINISTIC OVERRIDES (Apply based on raw text keywords)
-            # 1. Price Drop Overrides
-            pdc_keywords = ["price drop", "permanent price drop", "nlc reduction", "cost reduction", "price protection"]
-            if any(kw in email_text.lower() for kw in pdc_keywords):
-                all_fields["scheme_type"] = "PDC"
-                all_fields["scheme_subtype"] = "PDC"
-                self.logger.info("⚡ Strict Override: 'Price Drop' keywords detected. Forcing PDC-PDC.", console_only=True)
-                # Inject reasoning
+            email_lower = email_text.lower()
+            vendor_name_val = all_fields.get("vendor_name", "")
+            vendor_lower = str(vendor_name_val).lower() if vendor_name_val else ""
+            
+            # --- OVERRIDE LOGIC START ---
+            
+            # 1. BUY_SIDE (BS) / PERIODIC_CLAIM (PC) - JBP/Net Inwards (Absolute Highest Priority)
+            if any(re.search(kw, email_lower) for kw in [r"\bjbp\b", r"net\s+inwards"]):
+                all_fields["scheme_type"] = "BUY_SIDE"
+                all_fields["scheme_subtype"] = "PERIODIC_CLAIM"
+                self.logger.info("⚡ Strict Override: JBP/Net Inwards detected. Forcing BUY_SIDE-PERIODIC_CLAIM.", console_only=True)
                 if "scheme_type" in reasoning_data:
-                    reasoning_data["scheme_type"]["value"] = "PDC"
-                    reasoning_data["scheme_type"]["reasoning"] = "Strict Rule: 'Price Drop' keywords found in email text."
+                    reasoning_data["scheme_type"].update({"value": "BUY_SIDE", "reasoning": "Strict Rule: JBP/Net Inwards keywords found."})
                 if "scheme_subtype" in reasoning_data:
-                    reasoning_data["scheme_subtype"]["value"] = "PDC"
-                    reasoning_data["scheme_subtype"]["reasoning"] = "Strict Rule: 'Price Drop' keywords found in email text."
+                    reasoning_data["scheme_subtype"].update({"value": "PERIODIC_CLAIM", "reasoning": "Strict Rule: JBP/Net Inwards keywords found."})
 
-            # 2. Exchange Overrides (Only if not already PDC)
-            if all_fields["scheme_type"] != "PDC":
-                exchange_keywords = ["exchange", "prexo", "upgrade", "buyback", "bup", "prexo bumpup"]
-                if any(kw in email_text.lower() for kw in exchange_keywords):
-                    all_fields["scheme_type"] = "SELL_SIDE"
-                    all_fields["scheme_subtype"] = "PRX"
-                    self.logger.info("⚡ Strict Override: 'Exchange' keywords detected. Forcing SELL_SIDE-PRX.", console_only=True)
-                    # Inject reasoning
-                    if "scheme_type" in reasoning_data:
-                        reasoning_data["scheme_type"]["value"] = "SELL_SIDE"
-                        reasoning_data["scheme_type"]["reasoning"] = "Strict Rule: 'Exchange' keywords found in email text."
-                    if "scheme_subtype" in reasoning_data:
-                        reasoning_data["scheme_subtype"]["value"] = "PRX"
-                        reasoning_data["scheme_subtype"]["reasoning"] = "Strict Rule: 'Exchange' keywords found in email text."
-
-            # 3. LIFESTYLE (LS) STRICT OVERRIDES (Higher priority than general intent)
-            ls_keywords = ["sor", "sor pricing", "sor discounts", "monsoon sale", "monsoon", "fashion", "lifestyle", "clothing", "apparel"]
-            ls_vendors = [
+            # 2. LIFESTYLE (LS) STRICT OVERRIDDES (Second Priority)
+            elif (is_ls_vendor := any(v in vendor_lower for v in [
                 "aditya birla", "mgi distribution", "brand concepts", "timex", "titan", 
                 "metro brands", "sumitsu", "sea turtle", 
-                "beewakoof", "highlander", "leemboodi"
-            ]
-            
-            email_lower = email_text.lower()
-            vendor_lower = all_fields.get("vendor_name", "").lower()
-            
-            is_ls_vendor = any(v in vendor_lower for v in ls_vendors)
-            has_ls_keyword = any(kw in email_lower for kw in ls_keywords)
-            
-            if (is_ls_vendor or has_ls_keyword) and all_fields["scheme_type"] not in ["PDC", "OFC"]:
+                "beewakoof", "highlander", "leemboodi", "campus", "puma", "red tape", "high star"
+            ])) or (has_ls_keyword := any(kw in email_lower for kw in ["sor", "sor pricing", "sor discounts", "monsoon sale", "monsoon", "fashion", "lifestyle", "clothing", "apparel"])):
                 all_fields["scheme_type"] = "SELL_SIDE"
                 all_fields["scheme_subtype"] = "LS"
-                self.logger.info(f"⚡ Strict Override: Lifestyle Detection (Vendor: {is_ls_vendor}, Keywords: {has_ls_keyword}). Forcing SELL_SIDE-LS.", console_only=True)
-                # Inject reasoning
+                self.logger.info(f"⚡ Strict Override: Lifestyle Detection Triggered. Forcing SELL_SIDE-LS.", console_only=True)
+                # Reasoning update
                 if "scheme_type" in reasoning_data:
-                    reasoning_data["scheme_type"]["value"] = "SELL_SIDE"
-                    reasoning_data["scheme_type"]["reasoning"] = f"Strict Rule: Lifestyle trigger (Keyword or Vendor match: {vendor_lower})."
+                    reasoning_data["scheme_type"].update({"value": "SELL_SIDE", "reasoning": "Strict Rule: Lifestyle trigger (Keyword/Vendor)."})
                 if "scheme_subtype" in reasoning_data:
-                    reasoning_data["scheme_subtype"]["value"] = "LS"
-                    reasoning_data["scheme_subtype"]["reasoning"] = f"Strict Rule: Lifestyle trigger (Keyword or Vendor match: {vendor_lower})."
+                    reasoning_data["scheme_subtype"].update({"value": "LS", "reasoning": "Strict Rule: Lifestyle trigger (Keyword/Vendor)."})
+
+            # 3. ONE-OFF SALES SUPPORT (OFC/OFC)
+            elif any(kw in email_lower for kw in ["one-off sales support", "one-off", "sales support", "sell-out support"]):
+                all_fields["scheme_type"] = "OFC"
+                all_fields["scheme_subtype"] = "OFC"
+                self.logger.info("⚡ Strict Override: OFC keywords detected. Forcing OFC-OFC.", console_only=True)
+                if "scheme_type" in reasoning_data:
+                    reasoning_data["scheme_type"].update({"value": "OFC", "reasoning": "Strict Rule: OFC keywords."})
+                if "scheme_subtype" in reasoning_data:
+                    reasoning_data["scheme_subtype"].update({"value": "OFC", "reasoning": "Strict Rule: OFC keywords."})
+
+            # 4. PRICE DROP (PDC/PDC)
+            elif any(kw in email_lower for kw in ["price drop", "permanent price drop", "nlc reduction", "cost reduction", "price protection"]):
+                all_fields["scheme_type"] = "PDC"
+                all_fields["scheme_subtype"] = "PDC"
+                self.logger.info("⚡ Strict Override: Price Drop keywords detected. Forcing PDC-PDC.", console_only=True)
+                if "scheme_type" in reasoning_data:
+                    reasoning_data["scheme_type"].update({"value": "PDC", "reasoning": "Strict Rule: Price Drop keywords."})
+                if "scheme_subtype" in reasoning_data:
+                    reasoning_data["scheme_subtype"].update({"value": "PDC", "reasoning": "Strict Rule: Price Drop keywords."})
+
+            # 5. EXCHANGE (SELL_SIDE/PRX)
+            elif any(kw in email_lower for kw in ["exchange", "prexo", "upgrade", "buyback", "bup", "prexo bumpup"]):
+                all_fields["scheme_type"] = "SELL_SIDE"
+                all_fields["scheme_subtype"] = "PRX"
+                self.logger.info("⚡ Strict Override: Exchange keywords detected. Forcing SELL_SIDE-PRX.", console_only=True)
+                if "scheme_type" in reasoning_data:
+                    reasoning_data["scheme_type"].update({"value": "SELL_SIDE", "reasoning": "Strict Rule: Exchange keywords."})
+                if "scheme_subtype" in reasoning_data:
+                    reasoning_data["scheme_subtype"].update({"value": "PRX", "reasoning": "Strict Rule: Exchange keywords."})
+
+            # --- PAIRWISE VALIDATION LAYER ---
+            # Final safety check to ensure combinations are valid (Buyer logic)
+            stype = all_fields.get("scheme_type")
+            ssubtype = all_fields.get("scheme_subtype")
+            
+            # Rule 1: BUY_SIDE (BS) -> PERIODIC_CLAIM (PC)
+            if stype == "BUY_SIDE" and ssubtype != "PERIODIC_CLAIM":
+                self.logger.warning(f"⚠️  Fixing invalid pair: {stype}-{ssubtype} → {stype}-PERIODIC_CLAIM")
+                all_fields["scheme_subtype"] = "PERIODIC_CLAIM"
+            
+            # Rule 2: PDC -> PDC
+            elif stype == "PDC" and ssubtype != "PDC":
+                self.logger.warning(f"⚠️  Fixing invalid pair: {stype}-{ssubtype} → {stype}-PDC")
+                all_fields["scheme_subtype"] = "PDC"
+            
+            # Rule 3: OFC -> OFC
+            elif stype == "OFC" and ssubtype != "OFC":
+                self.logger.warning(f"⚠️  Fixing invalid pair: {stype}-{ssubtype} → {stype}-OFC")
+                all_fields["scheme_subtype"] = "OFC"
+            
+            # Rule 4: SELL_SIDE (SS) -> CP, PUC, PRX, LS
+            elif stype == "SELL_SIDE" and ssubtype not in ["CP", "PUC", "PRX", "LS"]:
+                # Default to CP if invalid subtype for Sell Side
+                self.logger.warning(f"⚠️  Fixing invalid pair: {stype}-{ssubtype} → {stype}-CP")
+                all_fields["scheme_subtype"] = "CP"
 
             # Log extractions
             self._log_extractions(result, all_fields)
@@ -322,7 +359,11 @@ class RetailerHubFieldExtractor:
             "config_unit_slab_lower": safe_get("config_unit_slab_lower", "0"),
             "config_unit_slab_upper": safe_get("config_unit_slab_upper", "999999"),
             "config_max_support_value": safe_get("config_max_support_value", "No Cap"),
-            "config_margin": safe_get("config_margin", "Not specified")
+            "config_margin": safe_get("config_margin", "Not specified"),
+            "model_name": safe_get("model_name", "Not Specified"),
+            "extracted_fsns": safe_get("extracted_fsns", "None"),
+            "cities_locations": safe_get("cities_locations", "National"),
+            "sub_periods": safe_get("sub_periods", "Single Period")
         }
         
         if fields["scheme_subtype"] == "PDC":

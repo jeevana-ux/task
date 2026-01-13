@@ -129,6 +129,26 @@ ANALYZE: Who is PROVIDING the support? That's the vendor."""
     vendor_name_reasoning = dspy.OutputField(
         desc="REASONING: How did you identify the brand vs personal sender name?"
     )
+
+    # ============================================================================
+    # NEW: Model Name (For FSN Lookup)
+    # ============================================================================
+    model_name = dspy.OutputField(
+        desc="""Extract the primary Model Name or Series mentioned.
+LOOK FOR: specific model identifiers, product titles, series names (e.g., 'Galaxy S24', 'Air Jordan 1', 'Model: X100').
+FORMAT: Return the most specific model name found. If multiple, return the dominant one or main series.
+IF NOT FOUND: Return 'Not Specified'."""
+    )
+
+    # ============================================================================
+    # NEW: Extracted FSNs (Found in text)
+    # ============================================================================
+    extracted_fsns = dspy.OutputField(
+        desc="""Extract any explicit FSNs (Flipkart Serial Numbers) mentioned in text or tables.
+FSN PATTERN: 13-16 character alphanumeric codes (e.g., 'ACCFGH1234567890').
+FORMAT: Semi-colon separated list (e.g., 'FSN1;FSN2;FSN3').
+IF NOT FOUND: Return 'None'."""
+    )
     
     # ============================================================================
     # Field 9: Price Drop Date (PDC Only)
@@ -141,6 +161,27 @@ STRICT FORMAT: 'DD/MM/YYYY' (e.g. 25/05/2024) or 'N/A'."""
     )
     price_drop_date_reasoning = dspy.OutputField(
         desc="REASONING: Is this a PDC scheme? What price drop date was mentioned?"
+    )
+
+    # ============================================================================
+    # NEW: Cities/Locations (For Grocery/HL City-based offers)
+    # ============================================================================
+    cities_locations = dspy.OutputField(
+        desc="""Extract any cities, regions, or warehouse locations mentioned as the scope of the offer.
+APPLICABLE: Mostly for Grocery/HL where offers are city-specific.
+LOOK FOR: 'Mumbai', 'Bangalore', 'Western Region', 'Chennai Warehouse', 'North Zone'.
+FORMAT: Semi-colon separated list.
+IF NOT FOUND: Return 'National'."""
+    )
+
+    # ============================================================================
+    # NEW: Sub Periods (For multi-period schemes)
+    # ============================================================================
+    sub_periods = dspy.OutputField(
+        desc="""Identify if the scheme has multiple sub-periods with different dates/ranges.
+PATTERN: '1st-10th Nov: 5% off, 11th-20th: 10% off'.
+FORMAT: List ranges as 'DD/MM/YYYY to DD/MM/YYYY'. Semi-colon separated.
+IF NOT FOUND: Return 'Single Period'."""
     )
     
     # ============================================================================

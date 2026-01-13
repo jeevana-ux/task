@@ -11,49 +11,77 @@ class ConfigGenerator:
     """
     
     @staticmethod
-    def generate_config(fields: Dict[str, Any]) -> Dict[str, Any]:
+    def generate_config(fields: Dict[str, Any], enrichment_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Generate the configuration JSON structure based on scheme type and subtype.
-        Uses LLM-extracted config_* fields for actual values.
+        Uses LLM-extracted config_* fields AND enriched mapping data.
         """
         scheme_type = fields.get("scheme_type", "")
         scheme_subtype = fields.get("scheme_subtype", "")
         
+        # Merge enrichment data into fields for convenience in generators
+        if enrichment_data:
+            fields = {**fields, **enrichment_data}
+            
+        # Handle multiple FSNs if present
+        resolve_fsns = fields.get("resolved_fsns")
+        if not resolve_fsns:
+            resolve_fsns = ["Populate from FSN File"]
+        
+        # Generator result
+        config_result = {}
+        
         # Handle PDC as standalone
         if scheme_type == "PDC":
-            return ConfigGenerator._gen_PDC(fields)
-        
-        # Normalize keys for lookup
-        key = f"{scheme_type}_{scheme_subtype}"
+            config_result = ConfigGenerator._gen_PDC(fields)
         
         # BS-PC (Buy_side - Periodic_claim)
-        if hasattr(ConfigGenerator, f"_gen_{scheme_type}_{scheme_subtype}"):
+        elif hasattr(ConfigGenerator, f"_gen_{scheme_type}_{scheme_subtype}"):
             generator = getattr(ConfigGenerator, f"_gen_{scheme_type}_{scheme_subtype}")
-            return generator(fields)
+            config_result = generator(fields)
             
         # Fallback/Generic handler
-        if scheme_type == "BUY_SIDE":
+        elif scheme_type == "BUY_SIDE":
             if scheme_subtype == "PERIODIC_CLAIM":
-                return ConfigGenerator._gen_BUY_SIDE_PERIODIC_CLAIM(fields)
-            if scheme_subtype == "PDC":
-                return ConfigGenerator._gen_BUY_SIDE_PDC(fields)
+                config_result = ConfigGenerator._gen_BUY_SIDE_PERIODIC_CLAIM(fields)
+            elif scheme_subtype == "PDC":
+                config_result = ConfigGenerator._gen_BUY_SIDE_PDC(fields)
                 
-        if scheme_type == "SELL_SIDE":
+        elif scheme_type == "SELL_SIDE":
             if scheme_subtype == "CP":
-                return ConfigGenerator._gen_SELL_SIDE_CP(fields)
-            if scheme_subtype == "PUC":
-                return ConfigGenerator._gen_SELL_SIDE_PUC(fields)
-            if scheme_subtype == "PRX":
-                return ConfigGenerator._gen_SELL_SIDE_PRX(fields)
-            if scheme_subtype == "SC": # Super Coin
-                 return ConfigGenerator._gen_SELL_SIDE_SC(fields)
-            if scheme_subtype == "LS": # Lifestyle
-                 return ConfigGenerator._gen_SELL_SIDE_LS(fields)
+                config_result = ConfigGenerator._gen_SELL_SIDE_CP(fields)
+            elif scheme_subtype == "PUC":
+                config_result = ConfigGenerator._gen_SELL_SIDE_PUC(fields)
+            elif scheme_subtype == "PRX":
+                config_result = ConfigGenerator._gen_SELL_SIDE_PRX(fields)
+            elif scheme_subtype == "SC": # Super Coin
+                 config_result = ConfigGenerator._gen_SELL_SIDE_SC(fields)
+            elif scheme_subtype == "LS": # Lifestyle
+                 config_result = ConfigGenerator._gen_SELL_SIDE_LS(fields)
 
-        if scheme_type == "OFC":
+        elif scheme_type == "OFC":
              return {"info": "No FSN Config required for OFC"}
 
-        return {"error": f"Unknown scheme configuration for {scheme_type} - {scheme_subtype}"}
+        else:
+            return {"error": f"Unknown scheme configuration for {scheme_type} - {scheme_subtype}"}
+
+        # Multi-product handling: if resolved_fsns has multiple, we duplicate the fields block per product
+        if "fields" in config_result and isinstance(config_result["fields"], dict):
+            base_fields = config_result["fields"]
+            product_list = []
+            for fsn in resolve_fsns:
+                p_fields = base_fields.copy()
+                p_fields["ProductId"] = fsn
+                product_list.append(p_fields)
+            
+            # If only one FSN, keep it simple, otherwise make it a list
+            if len(product_list) > 1:
+                config_result["products"] = product_list
+                del config_result["fields"]
+            else:
+                config_result["fields"]["ProductId"] = resolve_fsns[0]
+                
+        return config_result
 
     @staticmethod
     def _get_config_field(fields: Dict, config_key: str, fallback: str = "Not specified") -> str:
@@ -162,17 +190,17 @@ class ConfigGenerator:
     def _gen_SELL_SIDE_LS(fields: Dict) -> Dict:
         return {
             "config_type": "SS-LS",
-            "extraction_source": "LLM",
-            "description": "Lifestyle Scheme - DMRP details may need manual population from DMRP file",
+            "extraction_source": "LLM + Local Mapping",
+            "site_id": fields.get("site_id", "National"),
             "fields": {
                 "ProductId": "Populate from FSN File",
                 "unitSlabLower": ConfigGenerator._get_config_field(fields, "config_unit_slab_lower", "0"),
                 "unitSlabUpper": ConfigGenerator._get_config_field(fields, "config_unit_slab_upper", "999999"),
                 "brandSupport": ConfigGenerator._get_config_field(fields, "config_brand_support"),
                 "vendorSplitRatio": ConfigGenerator._get_config_field(fields, "config_vendor_split_ratio"),
-                "margin": ConfigGenerator._get_config_field(fields, "config_margin"),
-                "dmrpType": "Manual - From DMRP File",
-                "dmrpValue": "Manual - From DMRP File",
+                "margin": fields.get("margin", ConfigGenerator._get_config_field(fields, "config_margin")),
+                "dmrpType": fields.get("dmrpType", "Manual - From DMRP File"),
+                "dmrpValue": fields.get("dmrpValue", "Manual - From DMRP File"),
                 "maxSupportValue": ConfigGenerator._get_config_field(fields, "config_max_support_value", 
                                   fields.get("min_actual_discount_or_agreed_claim", "N/A"))
             }

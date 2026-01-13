@@ -88,15 +88,16 @@ class FileHandler:
         return pdf_files, xlsx_files
     
     @staticmethod
-    def xlsx_to_text(xlsx_path: Path) -> str:
+    def xlsx_to_text(xlsx_path: Path, row_limit: int = 50) -> str:
         """
-        Convert XLSX file to text representation.
+        Convert XLSX file to text representation, limiting the number of rows.
         
         Args:
             xlsx_path: Path to XLSX file
+            row_limit: Maximum number of data rows to include per sheet
         
         Returns:
-            Text representation of all sheets
+            Text representation of all sheets (up to row_limit each)
         """
         text_parts = []
         
@@ -110,12 +111,21 @@ class FileHandler:
                 
                 # Convert to pandas for easier text conversion
                 data = sheet.values
-                cols = next(data)
-                df = pd.DataFrame(data, columns=cols)
-                
-                # Convert to string
-                text_parts.append(df.to_string(index=False))
-                text_parts.append("\n")
+                try:
+                    cols = next(data)
+                    df = pd.DataFrame(data, columns=cols)
+                    
+                    # Apply row limit
+                    if row_limit and len(df) > row_limit:
+                        df = df.head(row_limit)
+                        trunc_msg = f"[NOTE: Only first {row_limit} rows shown for this sheet]"
+                        text_parts.append(trunc_msg + "\n")
+                    
+                    # Convert to string
+                    text_parts.append(df.to_string(index=False))
+                    text_parts.append("\n")
+                except StopIteration:
+                    text_parts.append("[Empty Sheet]\n")
             
             return "\n".join(text_parts)
         
